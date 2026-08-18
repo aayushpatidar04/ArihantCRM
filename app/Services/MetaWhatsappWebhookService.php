@@ -1,0 +1,1045 @@
+<?php
+
+namespace App\Services;
+
+use App\Events\MessageStatusUpdated;
+use App\Events\NewInboundMessage;
+use App\Events\WhatsAppMessageReceived;
+use App\Models\Customer;
+use App\Models\Document;
+use App\Models\Message;
+use App\Models\MetaWhatsappSetting;
+use App\Models\Team;
+use App\Models\WhatsappNumber;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use RuntimeException;
+
+class MetaWhatsappWebhookService
+{
+    private string $graphVersion;
+
+    public function __construct()
+    {
+        $this->graphVersion = config(
+            'services.meta.graph_version',
+            'v25.0'
+        );
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Verify Webhook
+    |--------------------------------------------------------------------------
+    */
+
+    public function verifyToken(string $verifyToken): MetaWhatsappSetting
+    {
+        $setting = MetaWhatsappSetting::query()
+            ->where('verify_token', $verifyToken)
+            ->where('is_active', true)
+            ->first();
+
+        if (!$setting) {
+            throw new RuntimeException(
+                'Invalid Meta WhatsApp verify token.'
+            );
+        }
+
+        return $setting;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Handle Webhook
+    |--------------------------------------------------------------------------
+    */
+
+    public function handle(string $payload, ): void {
+        $data = json_decode(
+            $payload,
+            true
+        );
+
+        if (!is_array($data)) {
+            throw new RuntimeException(
+                'Invalid Meta webhook payload.'
+            );
+        }
+
+        foreach ($data['entry'] ?? [] as $entry) {
+
+            foreach ($entry['changes'] ?? [] as $change) {
+
+                if (($change['field'] ?? null) !== 'messages') {
+                    continue;
+                }
+
+                $value = $change['value'] ?? [];
+
+                $phoneNumberId =
+                    $value['metadata']['phone_number_id']
+                    ?? null;
+
+                if (!$phoneNumberId) {
+                    continue;
+                }
+
+                $whatsappNumber = WhatsappNumber::query()
+                    ->where(
+                        'phone_number_id',
+                        $phoneNumberId
+                    )
+                    ->with('metaWhatsappSetting')
+                    ->first();
+
+                if (!$whatsappNumber) {
+                    continue;
+                }
+
+                $setting =
+                    $whatsappNumber->metaWhatsappSetting;
+
+                if (!$setting || !$setting->is_active) {
+                    continue;
+                }
+
+                /*
+                 * Signature verification can be enabled here.
+                 */
+
+                $setting->update([
+                    'last_webhook_at' => now(),
+                ]);
+
+                /*
+                 * Inbound messages.
+                 */
+                foreach ($value['messages'] ?? [] as $message) {
+
+                    $contact = $this->findContact(
+                        $value,
+                        $message
+                    );
+
+                    $this->processInboundMessage(
+                        $message,
+                        $contact,
+                        $whatsappNumber
+                    );
+                }
+
+                /*
+                 * Delivery/read/failure updates.
+                 */
+                foreach ($value['statuses'] ?? [] as $status) {
+
+                    $this->processStatus(
+                        $status,
+                        $whatsappNumber
+                    );
+                }
+            }
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Signature
+    |--------------------------------------------------------------------------
+    */
+
+    protected function verifySignature(string $payload, string $signature, string $appSecret): void {
+        if (!$appSecret) {
+            throw new RuntimeException(
+                'Meta app secret is missing.'
+            );
+        }
+
+        if (!str_starts_with($signature, 'sha256=')) {
+            throw new RuntimeException(
+                'Invalid Meta webhook signature.'
+            );
+        }
+
+        $receivedSignature =
+            substr($signature, 7);
+
+        $expectedSignature = hash_hmac(
+            'sha256',
+            $payload,
+            $appSecret
+        );
+
+        if (
+            !hash_equals(
+                $expectedSignature,
+                $receivedSignature
+            )
+        ) {
+            throw new RuntimeException(
+                'Invalid Meta webhook signature.'
+            );
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Contact
+    |--------------------------------------------------------------------------
+    */
+
+    protected function findContact(array $value, array $message): array {
+        $contacts = $value['contacts'] ?? [];
+
+        if (empty($contacts)) {
+            return [];
+        }
+
+        $messageFrom =
+            $message['from']
+            ?? null;
+
+        foreach ($contacts as $contact) {
+
+            if (
+                isset($contact['wa_id']) &&
+                $contact['wa_id'] === $messageFrom
+            ) {
+                return $contact;
+            }
+        }
+
+        return $contacts[0] ?? [];
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Process Inbound Message
+    |--------------------------------------------------------------------------
+    */
+
+    protected function processInboundMessage(array $message, array $contact, WhatsappNumber $whatsappNumber): void {
+        $whatsappMessageId =
+            $message['id'] ?? null;
+
+        if (!$whatsappMessageId) {
+            return;
+        }
+
+        /*
+         * Meta retries webhook events.
+         */
+        $alreadyExists = Message::query()
+            ->where(
+                'whatsapp_message_id',
+                $whatsappMessageId
+            )
+            ->exists();
+
+        if ($alreadyExists) {
+            return;
+        }
+
+        $phone =
+            $message['from']
+            ?? null;
+
+        if (!$phone) {
+            return;
+        }
+
+        $customer = $this->resolveCustomer(
+            $phone,
+            $contact,
+            $whatsappNumber
+        );
+
+        if (!$customer) {
+            return;
+        }
+
+        $type = $this->resolveMessageType(
+            $message
+        );
+
+        $body = $this->resolveMessageBody(
+            $message,
+            $type
+        );
+
+        /*
+         * Create the inbound message first.
+         *
+         * The Document needs message_id.
+         */
+        $dbMessage = Message::create([
+            'customer_id' => $customer->id,
+
+            /*
+             * Keep the current customer's assigned team.
+             */
+            'team_id' => $customer->team_id,
+
+            'whatsapp_number_id' =>
+                $whatsappNumber->id,
+
+            'sent_by' => null,
+
+            'whatsapp_message_id' =>
+                $whatsappMessageId,
+
+            'direction' => 'inbound',
+
+            'type' => $type,
+
+            'body' => $body,
+
+            'status' => 'delivered',
+        ]);
+
+        /*
+         * Media messages need to be downloaded from Meta
+         * and stored locally.
+         */
+        if ($this->isMediaType($type)) {
+
+            try {
+
+                $this->storeInboundMedia(
+                    $dbMessage,
+                    $message,
+                    $whatsappNumber
+                );
+
+            } catch (\Throwable $e) {
+
+                /*
+                 * Do not lose the inbound Message simply because
+                 * media downloading failed.
+                 */
+                report($e);
+
+                $dbMessage->update([
+                    'failure_reason' =>
+                        'Unable to download inbound media: '
+                        . $e->getMessage(),
+                ]);
+            }
+        }
+
+        $dbMessage->load([
+            'customer',
+            'document',
+            'sentBy:id,name',
+            'team:id,name',
+            'whatsappNumber:id,phone_number,display_phone_number',
+        ]);
+
+        /*
+         * Customer replied, therefore the 24-hour window starts/
+         * refreshes from this inbound message.
+         */
+        $customer->update([
+            'last_contacted_at' => now(),
+        ]);
+
+        broadcast(
+            new NewInboundMessage(
+                $dbMessage
+            )
+        );
+        broadcast(
+            new WhatsAppMessageReceived(
+                $dbMessage
+            )
+        );
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Media Detection
+    |--------------------------------------------------------------------------
+    */
+
+    protected function isMediaType(
+        string $type
+    ): bool {
+        return in_array(
+            $type,
+            [
+                'image',
+                'document',
+                'audio',
+                'video',
+                'sticker',
+            ],
+            true
+        );
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Store Inbound Media
+    |--------------------------------------------------------------------------
+    */
+
+    protected function storeInboundMedia(
+        Message $message,
+        array $metaMessage,
+        WhatsappNumber $whatsappNumber
+    ): ?Document {
+        $type =
+            $message->type;
+
+        /*
+         * Extract media information from the Meta payload.
+         */
+        $mediaData =
+            $metaMessage[$type]
+            ?? null;
+
+        if (!is_array($mediaData)) {
+            throw new RuntimeException(
+                'Media information is missing from Meta webhook.'
+            );
+        }
+
+        $mediaId =
+            $mediaData['id']
+            ?? null;
+
+        if (!$mediaId) {
+            throw new RuntimeException(
+                'Meta media ID is missing.'
+            );
+        }
+
+        /*
+         * Ask Meta for the temporary media URL.
+         */
+        $mediaInfo = $this->getMediaInfo(
+            $mediaId,
+            $whatsappNumber
+        );
+
+        $downloadUrl =
+            $mediaInfo['url']
+            ?? null;
+
+        if (!$downloadUrl) {
+            throw new RuntimeException(
+                'Meta did not return a media download URL.'
+            );
+        }
+
+        /*
+         * Download the actual media.
+         */
+        $response = Http::withToken(
+            $whatsappNumber->access_token
+        )
+            ->accept('*/*')
+            ->timeout(60)
+            ->get($downloadUrl);
+
+        if (!$response->successful()) {
+            throw new RuntimeException(
+                'Unable to download media from Meta.'
+            );
+        }
+
+        $contents =
+            $response->body();
+
+        if ($contents === '') {
+            throw new RuntimeException(
+                'Meta returned an empty media file.'
+            );
+        }
+
+        /*
+         * Resolve MIME type.
+         *
+         * Prefer Meta's MIME type, otherwise use the
+         * downloaded response's content type.
+         */
+        $mimeType =
+            $mediaInfo['mime_type']
+            ?? $response->header('Content-Type')
+            ?? 'application/octet-stream';
+
+        /*
+         * Filename.
+         */
+        $originalFilename =
+            $this->resolveInboundFilename(
+                $type,
+                $mediaData,
+                $mimeType
+            );
+
+        /*
+         * Determine extension.
+         */
+        $extension =
+            pathinfo(
+                $originalFilename,
+                PATHINFO_EXTENSION
+            );
+
+        if (!$extension) {
+            $extension =
+                $this->extensionFromMime(
+                    $mimeType
+                );
+        }
+
+        /*
+         * Generate a safe storage filename.
+         */
+        $storedFilename =
+            Str::uuid()->toString()
+            . ($extension
+                ? '.' . $extension
+                : '');
+
+        /*
+         * Keep WhatsApp media separated by customer.
+         *
+         * Example:
+         *
+         * whatsapp/123/inbound/uuid.jpg
+         */
+        $directory =
+            'whatsapp/'
+            . $message->customer_id
+            . '/inbound';
+
+        $path =
+            $directory
+            . '/'
+            . $storedFilename;
+
+        /*
+         * Store on public disk so Document::url works
+         * with php artisan storage:link.
+         */
+        Storage::disk('public')->put(
+            $path,
+            $contents
+        );
+
+        /*
+         * Create our Document record.
+         */
+        return Document::create([
+            'customer_id' =>
+                $message->customer_id,
+
+            'team_id' =>
+                $message->team_id,
+
+            'message_id' =>
+                $message->id,
+
+            'uploaded_by' =>
+                null,
+
+            'original_filename' =>
+                $originalFilename,
+
+            'stored_filename' =>
+                $storedFilename,
+
+            'disk' =>
+                'public',
+
+            'path' =>
+                $path,
+
+            'mime_type' =>
+                $mimeType,
+
+            'size' =>
+                strlen($contents),
+
+            'source' =>
+                'whatsapp',
+
+            'status' =>
+                'completed',
+
+            'notes' =>
+                null,
+
+            'encryption_key_id' =>
+                null,
+        ]);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Get Media Information From Meta
+    |--------------------------------------------------------------------------
+    */
+
+    protected function getMediaInfo(
+        string $mediaId,
+        WhatsappNumber $whatsappNumber
+    ): array {
+        if (!$whatsappNumber->access_token) {
+            throw new RuntimeException(
+                'WhatsApp access token is missing.'
+            );
+        }
+
+        $response = Http::withToken(
+            $whatsappNumber->access_token
+        )
+            ->acceptJson()
+            ->timeout(30)
+            ->get(
+                "https://graph.facebook.com/{$this->graphVersion}/{$mediaId}"
+            );
+
+        if (!$response->successful()) {
+            throw new RuntimeException(
+                $response->json('error.message')
+                ?? 'Unable to fetch WhatsApp media information.'
+            );
+        }
+
+        return $response->json();
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Filename
+    |--------------------------------------------------------------------------
+    */
+
+    protected function resolveInboundFilename(
+        string $type,
+        array $mediaData,
+        string $mimeType
+    ): string {
+        /*
+         * Documents normally contain filename.
+         */
+        if (
+            !empty($mediaData['filename'])
+        ) {
+            return $mediaData['filename'];
+        }
+
+        /*
+         * Images/videos/audio/stickers don't normally
+         * provide a filename.
+         */
+        $extension =
+            $this->extensionFromMime(
+                $mimeType
+            );
+
+        return $type
+            . '_' . now()->format('Ymd_His')
+            . ($extension
+                ? '.' . $extension
+                : '');
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | MIME → Extension
+    |--------------------------------------------------------------------------
+    */
+
+    protected function extensionFromMime(
+        string $mimeType
+    ): ?string {
+        return match (strtolower($mimeType)) {
+
+            'image/jpeg',
+            'image/jpg' =>
+            'jpg',
+
+            'image/png' =>
+            'png',
+
+            'image/webp' =>
+            'webp',
+
+            'image/gif' =>
+            'gif',
+
+            'video/mp4' =>
+            'mp4',
+
+            'video/3gpp' =>
+            '3gp',
+
+            'audio/mpeg' =>
+            'mp3',
+
+            'audio/ogg' =>
+            'ogg',
+
+            'audio/aac' =>
+            'aac',
+
+            'audio/amr' =>
+            'amr',
+
+            'audio/opus' =>
+            'opus',
+
+            'application/pdf' =>
+            'pdf',
+
+            'application/msword' =>
+            'doc',
+
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document' =>
+            'docx',
+
+            'application/vnd.ms-excel' =>
+            'xls',
+
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' =>
+            'xlsx',
+
+            default =>
+            null,
+        };
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Resolve Customer
+    |--------------------------------------------------------------------------
+    */
+
+    protected function resolveCustomer(
+        string $phone,
+        array $contact,
+        WhatsappNumber $whatsappNumber
+    ): ?Customer {
+        $phone = preg_replace(
+            '/[^0-9]/',
+            '',
+            $phone
+        );
+
+        if (!$phone) {
+            return null;
+        }
+
+        $customer = Customer::query()
+            ->where(function ($query) use ($phone) {
+
+                $query
+                    ->where('phone', $phone)
+                    ->orWhere(
+                        'phone',
+                        '+' . $phone
+                    );
+            })
+            ->first();
+
+        if ($customer) {
+            return $customer;
+        }
+
+        $team =
+            $this->resolveRoundRobinTeam();
+
+        if (!$team) {
+            return null;
+        }
+
+        $name =
+            $contact['profile']['name']
+            ?? $phone;
+
+        return Customer::create([
+            'name' =>
+                $name,
+
+            'phone' =>
+                $phone,
+
+            'team_id' =>
+                $team->id,
+
+            'status' =>
+                'active',
+        ]);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Resolve Message Type
+    |--------------------------------------------------------------------------
+    */
+
+    protected function resolveMessageType(
+        array $message
+    ): string {
+        $metaType =
+            $message['type']
+            ?? 'text';
+
+        return match ($metaType) {
+
+            'text' =>
+            'text',
+
+            'image' =>
+            'image',
+
+            'document' =>
+            'document',
+
+            'audio' =>
+            'audio',
+
+            'video' =>
+            'video',
+
+            'sticker' =>
+            'sticker',
+
+            'location' =>
+            'location',
+
+            'contacts' =>
+            'contact',
+
+            default =>
+            'chat',
+        };
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Resolve Body / Caption
+    |--------------------------------------------------------------------------
+    */
+
+    protected function resolveMessageBody(
+        array $message,
+        string $type
+    ): ?string {
+        return match ($type) {
+
+            'text' =>
+            $message['text']['body']
+            ?? null,
+
+            'image' =>
+            $message['image']['caption']
+            ?? null,
+
+            'document' =>
+            $message['document']['caption']
+            ?? null,
+
+            'video' =>
+            $message['video']['caption']
+            ?? null,
+
+            'audio' =>
+            null,
+
+            'sticker' =>
+            null,
+
+            'location' =>
+            isset($message['location'])
+            ? json_encode(
+                $message['location']
+            )
+            : null,
+
+            'contact' =>
+            isset($message['contacts'])
+            ? json_encode(
+                $message['contacts']
+            )
+            : null,
+
+            default =>
+            null,
+        };
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Status Updates
+    |--------------------------------------------------------------------------
+    */
+
+    protected function processStatus(
+        array $status,
+        WhatsappNumber $whatsappNumber
+    ): void {
+        $whatsappMessageId =
+            $status['id'] ?? null;
+
+        if (!$whatsappMessageId) {
+            return;
+        }
+
+        $message = Message::query()
+            ->where(
+                'whatsapp_message_id',
+                $whatsappMessageId
+            )
+            ->where(
+                'whatsapp_number_id',
+                $whatsappNumber->id
+            )
+            ->first();
+
+        if (!$message) {
+            return;
+        }
+
+        $statusValue =
+            $status['status'] ?? null;
+
+        if (!$statusValue) {
+            return;
+        }
+
+        $updates = [];
+
+        switch ($statusValue) {
+
+            case 'sent':
+
+                $updates['status'] =
+                    'sent';
+
+                break;
+
+            case 'delivered':
+
+                $updates['status'] =
+                    'delivered';
+
+                $updates['delivered_at'] =
+                    now();
+
+                break;
+
+            case 'read':
+
+                $updates['status'] =
+                    'read';
+
+                $updates['read_at'] =
+                    now();
+
+                break;
+
+            case 'failed':
+
+                $updates['status'] =
+                    'failed';
+
+                $updates['failure_reason'] =
+                    $this->extractFailureReason(
+                        $status
+                    );
+
+                break;
+        }
+
+        if (!empty($updates)) {
+            $message->update($updates);
+            $message->refresh();
+
+            broadcast(new MessageStatusUpdated($message));
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Failure Reason
+    |--------------------------------------------------------------------------
+    */
+
+    protected function extractFailureReason(
+        array $status
+    ): ?string {
+        $errors =
+            $status['errors'] ?? [];
+
+        if (empty($errors)) {
+            return null;
+        }
+
+        $first =
+            $errors[0];
+
+        return $first['title']
+            ?? $first['message']
+            ?? null;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Round Robin
+    |--------------------------------------------------------------------------
+    */
+
+    protected function resolveRoundRobinTeam(): ?Team
+    {
+        $teams = Team::query()
+            ->where(
+                'is_active',
+                true
+            )
+            ->orderBy('id')
+            ->get();
+
+        if ($teams->isEmpty()) {
+            return null;
+        }
+
+        $lastAssignedTeamId =
+            Customer::query()
+                ->whereIn(
+                    'team_id',
+                    $teams->pluck('id')
+                )
+                ->latest('id')
+                ->value('team_id');
+
+        if (!$lastAssignedTeamId) {
+            return $teams->first();
+        }
+
+        $currentIndex =
+            $teams->search(
+                fn($team) =>
+                (int) $team->id ===
+                (int) $lastAssignedTeamId
+            );
+
+        if ($currentIndex === false) {
+            return $teams->first();
+        }
+
+        $nextIndex =
+            ($currentIndex + 1)
+            % $teams->count();
+
+        return $teams->get(
+            $nextIndex
+        );
+    }
+}
