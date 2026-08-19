@@ -91,6 +91,27 @@ function deleteTeam(team) {
 function statusClass(isActive) {
     return isActive ? "bg-brand-100 text-brand-700" : "bg-red-100 text-red-600";
 }
+
+const syncingBitrix = ref(false)
+
+const syncBitrix = () => {
+    if (syncingBitrix.value) {
+        return
+    }
+
+    syncingBitrix.value = true
+
+    router.post(
+        route('superadmin.teams.sync-bitrix'),
+        {},
+        {
+            preserveScroll: true,
+            onFinish: () => {
+                syncingBitrix.value = false
+            },
+        }
+    )
+}
 </script>
 
 <template>
@@ -181,6 +202,72 @@ function statusClass(isActive) {
                     >
                         Clear
                     </button>
+
+                    <button
+                        type="button"
+                        @click="syncBitrix"
+                        :disabled="syncingBitrix"
+                        class="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                        <svg
+                            v-if="syncingBitrix"
+                            class="h-4 w-4 animate-spin"
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                        >
+                            <circle
+                                class="opacity-25"
+                                cx="12"
+                                cy="12"
+                                r="10"
+                                stroke="currentColor"
+                                stroke-width="4"
+                            />
+
+                            <path
+                                class="opacity-75"
+                                fill="currentColor"
+                                d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                            />
+                        </svg>
+
+                        <svg
+                            v-else
+                            class="h-4 w-4"
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                d="M4 4v5h5"
+                            />
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                d="M20 20v-5h-5"
+                            />
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                d="M5.5 9a7 7 0 0111.9-2.5L20 9"
+                            />
+                            <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                d="M18.5 15a7 7 0 01-11.9 2.5L4 15"
+                            />
+                        </svg>
+
+                        <span>
+                            {{ syncingBitrix ? 'Syncing...' : 'Sync from Bitrix' }}
+                        </span>
+                    </button>
+
                 </div>
             </div>
 

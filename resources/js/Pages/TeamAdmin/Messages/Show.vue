@@ -29,8 +29,28 @@ import {
 
 import { usePrivateChannel } from "@/Composables/useEcho";
 import TeamAdminLayout from "@/Components/Layout/TeamAdminLayout.vue";
+import { useToast } from "@/Composables/useToast";
 
 const page = usePage();
+const { success, error } = useToast();
+
+const responseErrorMessage = (requestError, fallback) => {
+    const responseData = requestError?.response?.data;
+    const validationError = Object.values(responseData?.errors ?? {})
+        .flat()
+        .find(Boolean);
+
+    return responseData?.message
+        || responseData?.failure_reason
+        || validationError
+        || (typeof responseData === "string" ? responseData : null)
+        || requestError?.message
+        || fallback;
+};
+
+const showWindowClosedError = () => {
+    error("The 24-hour WhatsApp window is closed. Please use a template.");
+};
 
 const currentTeam = computed(() => page.props.workspace?.current_team ?? props.customer?.team ?? null);
 
@@ -1211,6 +1231,7 @@ const sendTextMessage = async () => {
     }
 
     if (!canSendNormalMessage.value) {
+        showWindowClosedError();
         return;
     }
 
@@ -1234,8 +1255,10 @@ const sendTextMessage = async () => {
         await appendOwnMessage(response.data.message);
 
         messageText.value = "";
-    } catch (error) {
-        console.error("Unable to send message:", error);
+        success("Message sent.");
+    } catch (requestError) {
+        console.error("Unable to send message:", requestError);
+        error(responseErrorMessage(requestError, "Unable to send message."));
     } finally {
         sending.value = false;
     }
@@ -1263,6 +1286,7 @@ const sendAttachment = async () => {
     }
 
     if (!canSendNormalMessage.value) {
+        showWindowClosedError();
         return;
     }
 
@@ -1296,8 +1320,10 @@ const sendAttachment = async () => {
         selectedFile.value = null;
 
         messageText.value = "";
-    } catch (error) {
-        console.error("Unable to send attachment:", error);
+        success("Media sent.");
+    } catch (requestError) {
+        console.error("Unable to send attachment:", requestError);
+        error(responseErrorMessage(requestError, "Unable to send media."));
     } finally {
         sending.value = false;
     }
@@ -1309,6 +1335,7 @@ const sendTemplate = async () => {
     }
 
     if (templateHasMissingVariables.value) {
+        error("Please fill in all required template variables.");
         return;
     }
 
@@ -1346,8 +1373,10 @@ const sendTemplate = async () => {
         if (windowOpen.value) {
             composerMode.value = "normal";
         }
-    } catch (error) {
-        console.error("Unable to send template:", error);
+        success("Template sent.");
+    } catch (requestError) {
+        console.error("Unable to send template:", requestError);
+        error(responseErrorMessage(requestError, "Unable to send template."));
     } finally {
         sending.value = false;
     }
@@ -1433,6 +1462,10 @@ usePrivateChannel(`whatsapp.team.${currentTeam.value?.id ?? props.customer.team_
         }
 
         messageList.value[index] = normalizeMessage(updatedMessage);
+
+        if (updatedMessage.status === "failed") {
+            error(updatedMessage.failure_reason || "WhatsApp delivery failed.");
+        }
     },
 
     "message.received": (event) => {

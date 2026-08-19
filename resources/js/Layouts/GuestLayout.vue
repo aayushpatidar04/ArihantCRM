@@ -1,6 +1,8 @@
 <script setup>
 import ApplicationLogo from '@/Components/ApplicationLogo.vue';
 import { Link } from '@inertiajs/vue3';
+import ToastStack from '@/Components/UI/ToastStack.vue';
+import FlashToastBridge from '@/Components/UI/FlashToastBridge.vue';
 </script>
 
 <template>
@@ -17,6 +19,8 @@ import { Link } from '@inertiajs/vue3';
             class="mt-6 w-full overflow-hidden bg-white px-6 py-4 shadow-md sm:max-w-md sm:rounded-lg dark:bg-gray-800"
         >
             <slot />
+            <ToastStack />
+            <FlashToastBridge />
         </div>
     </div>
 </template>

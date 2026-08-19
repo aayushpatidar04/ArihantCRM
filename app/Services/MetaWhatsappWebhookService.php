@@ -10,7 +10,9 @@ use App\Models\Document;
 use App\Models\Message;
 use App\Models\MetaWhatsappSetting;
 use App\Models\Team;
+use App\Models\User;
 use App\Models\WhatsappNumber;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -260,8 +262,10 @@ class MetaWhatsappWebhookService
             return;
         }
 
-        $participant = app(ConversationParticipantService::class)
-            ->resolveInbound($customer, $whatsappNumber);
+        $specialTeam = Team::query()
+            ->where('slug', 'arihant-special-session')
+            ->where('whatsapp_number_id', $whatsappNumber->id)
+            ->first();
 
         $type = $this->resolveMessageType(
             $message
@@ -283,15 +287,12 @@ class MetaWhatsappWebhookService
             /*
              * Keep the current customer's assigned team.
              */
-            'team_id' => $customer->team_id,
+            'team_id' => $specialTeam?->id ?? $customer->team_id,
 
             'whatsapp_number_id' =>
                 $whatsappNumber->id,
 
             'sent_by' => null,
-
-            'conversation_user_id' => $participant['user_id'],
-            'conversation_team_id' => $participant['team_id'],
 
             'whatsapp_message_id' =>
                 $whatsappMessageId,
@@ -758,10 +759,9 @@ class MetaWhatsappWebhookService
             return $customer;
         }
 
-        $team =
-            $this->resolveRoundRobinTeam();
+        $assignment = $this->resolveRoundRobinAssignment($whatsappNumber);
 
-        if (!$team) {
+        if (!$assignment) {
             return null;
         }
 
@@ -769,19 +769,15 @@ class MetaWhatsappWebhookService
             $contact['profile']['name']
             ?? $phone;
 
-        return Customer::create([
-            'name' =>
-                $name,
-
-            'phone' =>
-                $phone,
-
-            'team_id' =>
-                $team->id,
-
-            'status' =>
-                'active',
-        ]);
+        return DB::transaction(function () use ($name, $phone, $assignment) {
+            return Customer::create([
+                'name' => $name,
+                'phone' => $phone,
+                'team_id' => $assignment['team_id'],
+                'assigned_to' => $assignment['user_id'],
+                'status' => 'active',
+            ]);
+        });
     }
 
     /*
@@ -1002,50 +998,51 @@ class MetaWhatsappWebhookService
     |--------------------------------------------------------------------------
     */
 
-    protected function resolveRoundRobinTeam(): ?Team
+    protected function resolveRoundRobinAssignment(WhatsappNumber $whatsappNumber): ?array
     {
-        $teams = Team::query()
-            ->where(
-                'is_active',
-                true
+        $specialTeam = Team::query()
+            ->where('slug', 'arihant-special-session')
+            ->where('whatsapp_number_id', $whatsappNumber->id)
+            ->first();
+
+        $executives = User::query()
+            ->where('is_active', true)
+            ->whereHas('roles', function ($query) {
+                $query->where('name', 'executive');
+            })
+            ->when(
+                !$specialTeam,
+                function ($query) use ($whatsappNumber) {
+                    $query->whereHas('team', function ($teamQuery) use ($whatsappNumber) {
+                        $teamQuery
+                            ->where('is_active', true)
+                            ->where('whatsapp_number_id', $whatsappNumber->id);
+                    });
+                }
             )
             ->orderBy('id')
-            ->get();
+            ->get(['id', 'team_id']);
 
-        if ($teams->isEmpty()) {
+        if ($executives->isEmpty()) {
             return null;
         }
 
-        $lastAssignedTeamId =
-            Customer::query()
-                ->whereIn(
-                    'team_id',
-                    $teams->pluck('id')
-                )
-                ->latest('id')
-                ->value('team_id');
+        $lastAssignedUserId = Customer::query()
+            ->whereIn('assigned_to', $executives->pluck('id'))
+            ->latest('id')
+            ->value('assigned_to');
 
-        if (!$lastAssignedTeamId) {
-            return $teams->first();
-        }
-
-        $currentIndex =
-            $teams->search(
-                fn($team) =>
-                (int) $team->id ===
-                (int) $lastAssignedTeamId
-            );
-
-        if ($currentIndex === false) {
-            return $teams->first();
-        }
-
-        $nextIndex =
-            ($currentIndex + 1)
-            % $teams->count();
-
-        return $teams->get(
-            $nextIndex
+        $currentIndex = $executives->search(
+            fn (User $executive) => (int) $executive->id === (int) $lastAssignedUserId
         );
+
+        $nextExecutive = $currentIndex === false
+            ? $executives->first()
+            : $executives->get(($currentIndex + 1) % $executives->count());
+
+        return [
+            'user_id' => $nextExecutive->id,
+            'team_id' => $nextExecutive->team_id,
+        ];
     }
 }

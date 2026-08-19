@@ -17,6 +17,7 @@ import {
 } from "lucide-vue-next";
 
 import ToastStack from "@/Components/UI/ToastStack.vue";
+import FlashToastBridge from "@/Components/UI/FlashToastBridge.vue";
 
 import { useEcho } from "@/Composables/useEcho";
 
@@ -332,18 +333,6 @@ const handleRealtimeMessage = (payload) => {
     /*
      * Ensure this belongs to the current workspace.
      */
-
-    if (Number(message.team_id) !== Number(currentTeam.value?.id)) {
-        return;
-    }
-
-    if (
-        message.whatsapp_number_id &&
-        activeConversationWhatsappNumberId.value &&
-        Number(message.whatsapp_number_id) !== Number(activeConversationWhatsappNumberId.value)
-    ) {
-        return;
-    }
 
     /*
      * If this message already exists in the current
@@ -1014,5 +1003,6 @@ onUnmounted(() => {
         </div>
 
         <ToastStack />
+        <FlashToastBridge />
     </div>
 </template>

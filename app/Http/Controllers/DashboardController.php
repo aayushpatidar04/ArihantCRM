@@ -8,10 +8,15 @@ use App\Models\Document;
 use App\Models\Message;
 use App\Models\User;
 use App\Models\WhatsappNumber;
+use App\Services\BitrixLeadService;
 use App\Services\TeamWorkspaceService;
+use Illuminate\Http\Client\RequestException;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -669,10 +674,10 @@ class DashboardController extends Controller
 
                 return [
                     /*
-                    * Conversation key.
-                    *
-                    * No session_id.
-                    */
+                     * Conversation key.
+                     *
+                     * No session_id.
+                     */
                     'conversation_key' =>
                         $message->team_id
                         . ':'
@@ -717,14 +722,14 @@ class DashboardController extends Controller
 
                     'document' =>
                         $message->document
-                            ? [
-                                'id' => $message->document->id,
-                                'filename' => $message->document->original_filename,
-                                'mime_type' => $message->document->mime_type,
-                                'url' => $message->document->url,
-                                'size' => $message->document->formatted_size,
-                            ]
-                            : null,
+                        ? [
+                            'id' => $message->document->id,
+                            'filename' => $message->document->original_filename,
+                            'mime_type' => $message->document->mime_type,
+                            'url' => $message->document->url,
+                            'size' => $message->document->formatted_size,
+                        ]
+                        : null,
 
                     'unread_count' =>
                         (int) $message->unread_count,
@@ -734,27 +739,27 @@ class DashboardController extends Controller
 
                     'time_ago' =>
                         $message->created_at
-                            ? $message->created_at->diffForHumans()
-                            : '',
+                        ? $message->created_at->diffForHumans()
+                        : '',
                 ];
             });
 
         return response()->json([
             /*
-            * Total individual unread messages.
-            */
+             * Total individual unread messages.
+             */
             'unread_count' =>
                 $unreadCount,
 
             /*
-            * Number of conversations with unread messages.
-            */
+             * Number of conversations with unread messages.
+             */
             'unread_chat_count' =>
                 $unreadChats->count(),
 
             /*
-            * Latest unread message per conversation.
-            */
+             * Latest unread message per conversation.
+             */
             'unread_chats' =>
                 $unreadChats->values(),
         ]);
@@ -1001,9 +1006,9 @@ class DashboardController extends Controller
 
                     'time_ago' =>
                         $message->created_at
-                            ? $message->created_at
-                                ->diffForHumans()
-                            : null,
+                        ? $message->created_at
+                            ->diffForHumans()
+                        : null,
 
                     'has_document' =>
                         $message->document !== null,
@@ -1111,6 +1116,145 @@ class DashboardController extends Controller
                     $messageChart,
             ]
         );
+    }
+
+    public function fetchBitrixLead(
+        Request $request,
+        BitrixLeadService $bitrixLeadService
+    ): RedirectResponse {
+        $validated = $request->validate([
+            'lead_id' => [
+                'required',
+                'integer',
+                'min:1',
+            ],
+        ]);
+
+        try {
+            $result = $bitrixLeadService->fetchAndSync(
+                leadId: (int) $validated['lead_id'],
+                source: 'manual'
+            );
+
+            /** @var \App\Models\Customer $customer */
+            $customer = $result['customer'];
+
+            /*
+             * ---------------------------------------------------------
+             * BASE SUCCESS MESSAGE
+             * ---------------------------------------------------------
+             */
+            if ($result['action'] === 'created') {
+                $message =
+                    "Lead {$validated['lead_id']} was fetched and " .
+                    "customer {$customer->name} was created.";
+            } else {
+                $message =
+                    "Lead {$validated['lead_id']} was fetched and " .
+                    "customer {$customer->name} was updated.";
+            }
+
+            /*
+             * ---------------------------------------------------------
+             * ASSIGNED USER CHANGE
+             * ---------------------------------------------------------
+             */
+            if ($result['assignment_changed']) {
+                $message .=
+                    ' Assigned executive was updated.';
+            }
+
+            /*
+             * ---------------------------------------------------------
+             * TEAM CHANGE
+             * ---------------------------------------------------------
+             */
+            if ($result['team_changed']) {
+                $message .=
+                    ' Customer team was updated.';
+            }
+
+            /*
+             * ---------------------------------------------------------
+             * OLD OWNER CHANGE
+             * ---------------------------------------------------------
+             */
+            if ($result['old_owner_changed']) {
+                $message .=
+                    ' Old owner was updated.';
+            }
+
+            return back()->with(
+                'success',
+                $message
+            );
+        }
+
+        /*
+         * Validation errors from BitrixLeadService.
+         *
+         * Example:
+         *
+         * No local user mapped to AssignedById.
+         * User has no primary team.
+         * Invalid phone.
+         */ catch (ValidationException $e) {
+            throw $e;
+        }
+
+        /*
+         * Bitrix API failed.
+         */ catch (RequestException $e) {
+            Log::error(
+                'Manual Bitrix lead fetch failed.',
+                [
+                    'lead_id' =>
+                        $validated['lead_id'],
+
+                    'status' =>
+                        $e->response?->status(),
+
+                    'message' =>
+                        $e->getMessage(),
+
+                    'user_id' =>
+                        $request->user()?->id,
+                ]
+            );
+
+            return back()->withErrors([
+                'lead_id' =>
+                    'Unable to fetch this lead from Bitrix. ' .
+                    'Please verify the Lead ID and try again.',
+            ]);
+        }
+
+        /*
+         * Any unexpected error.
+         */ catch (\Throwable $e) {
+            Log::error(
+                'Manual Bitrix lead synchronization failed.',
+                [
+                    'lead_id' =>
+                        $validated['lead_id'],
+
+                    'user_id' =>
+                        $request->user()?->id,
+
+                    'message' =>
+                        $e->getMessage(),
+
+                    'exception' =>
+                        $e,
+                ]
+            );
+
+            return back()->withErrors([
+                'lead_id' =>
+                    'The lead could not be synchronized: ' .
+                    $e->getMessage(),
+            ]);
+        }
     }
 
 }

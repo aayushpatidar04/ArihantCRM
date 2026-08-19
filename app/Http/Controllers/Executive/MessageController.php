@@ -229,6 +229,8 @@ class MessageController extends Controller
             $team->whatsapp_number_id
         );
 
+        $visibleNumberIds = $this->visibleWhatsappNumberIds($conversationNumberId);
+
         /*
         |--------------------------------------------------------------------------
         | Messages
@@ -240,7 +242,7 @@ class MessageController extends Controller
         */
 
         $messages = $customer->messages()
-            ->where('whatsapp_number_id', $conversationNumberId)
+            ->whereIn('whatsapp_number_id', $visibleNumberIds)
             ->with([
                 'sentBy:id,name',
                 'team:id,name',
@@ -306,8 +308,9 @@ class MessageController extends Controller
         $lastInboundMessage = $customer->messages()
             ->where('direction', 'inbound')
             ->where(
-                'whatsapp_number_id',
-                $conversationNumberId
+                function ($query) use ($visibleNumberIds) {
+                    $query->whereIn('whatsapp_number_id', $visibleNumberIds);
+                }
             )
             ->latest('created_at')
             ->first();
@@ -357,7 +360,7 @@ class MessageController extends Controller
 
         $totalMessages = Message::query()
             ->where('customer_id', $customer->id)
-            ->where('whatsapp_number_id', $conversationNumberId)
+            ->whereIn('whatsapp_number_id', $visibleNumberIds)
             ->count();
 
         $hasMoreMessages =
@@ -466,6 +469,8 @@ class MessageController extends Controller
             $team->whatsapp_number_id
         );
 
+        $visibleNumberIds = $this->visibleWhatsappNumberIds($whatsappNumberId);
+
         /*
         |--------------------------------------------------------------------------
         | Messages
@@ -476,7 +481,7 @@ class MessageController extends Controller
 
         $messages = Message::query()
             ->where('customer_id', $customer->id)
-            ->where('whatsapp_number_id', $whatsappNumberId)
+            ->whereIn('whatsapp_number_id', $visibleNumberIds)
             ->with([
                 'customer:id,name,phone',
                 'sentBy:id,name',
@@ -583,7 +588,7 @@ class MessageController extends Controller
 
         Message::query()
             ->where('customer_id', $customer->id)
-            ->where('whatsapp_number_id', $whatsappNumberId)
+            ->whereIn('whatsapp_number_id', $visibleNumberIds)
             ->where('direction', 'inbound')
             ->whereNull('read_at')
             ->update([
@@ -671,13 +676,17 @@ class MessageController extends Controller
             ],
         ]);
 
-        $number = $team->whatsappNumber;
+        $number = app(\App\Services\SpecialSessionService::class)
+            ->replyNumber($customer, $team);
 
         abort_unless(
             $number && $number->is_active,
             422,
             'No active WhatsApp number is assigned to this team.'
         );
+
+        $messageTeam = app(\App\Services\SpecialSessionService::class)
+            ->messageTeam($number, $team);
 
         /*
         |--------------------------------------------------------------------------
@@ -702,10 +711,10 @@ class MessageController extends Controller
             'The 24-hour WhatsApp messaging window is closed. Please use a template.'
         );
 
-        $message = DB::transaction(function () use ($customer, $team, $number, $user, $data) {
+        $message = DB::transaction(function () use ($customer, $messageTeam, $number, $user, $data) {
             return Message::create([
                 'customer_id' => $customer->id,
-                'team_id' => $team->id,
+                'team_id' => $messageTeam->id,
                 'whatsapp_number_id' => $number->id,
                 'sent_by' => $user->id,
 
@@ -805,16 +814,11 @@ class MessageController extends Controller
         | Resolve WhatsApp number
         |--------------------------------------------------------------------------
         */
-
-        $whatsappNumberId = Message::query()
-            ->where('customer_id', $customer->id)
-            // ->where('team_id', $team->id)
-            ->latest('created_at')
-            ->value('whatsapp_number_id');
-
-        if (!$whatsappNumberId) {
-            $whatsappNumberId = $team->whatsapp_number_id;
-        }
+        
+        $replyNumber = app(\App\Services\SpecialSessionService::class)
+            ->replyNumber($customer, $team);
+        
+        $whatsappNumberId = $replyNumber?->id;
 
         abort_unless(
             $whatsappNumberId,
@@ -832,6 +836,9 @@ class MessageController extends Controller
             422,
             'The WhatsApp number is unavailable or inactive.'
         );
+
+        $messageTeam = app(\App\Services\SpecialSessionService::class)
+            ->messageTeam($whatsappNumber, $team);
 
         /*
         |--------------------------------------------------------------------------
@@ -904,7 +911,7 @@ class MessageController extends Controller
 
         $message = Message::create([
             'customer_id' => $customer->id,
-            'team_id' => $team->id,
+            'team_id' => $messageTeam->id,
             'whatsapp_number_id' => $whatsappNumber->id,
             'sent_by' => $user->id,
 
@@ -1022,13 +1029,17 @@ class MessageController extends Controller
 
         $components = $validated['components'] ?? [];
 
-        $whatsappNumber = $team->whatsappNumber;
+        $whatsappNumber = app(\App\Services\SpecialSessionService::class)
+            ->replyNumber($customer, $team);
 
         abort_unless(
             $whatsappNumber && $whatsappNumber->is_active,
             422,
             'No active WhatsApp number is connected to this team.'
         );
+
+        $messageTeam = app(\App\Services\SpecialSessionService::class)
+            ->messageTeam($whatsappNumber, $team);
 
         $template = $whatsappNumber
             ->whatsappTemplates()
@@ -1180,7 +1191,7 @@ class MessageController extends Controller
 
         $message = Message::create([
             'customer_id' => $customer->id,
-            'team_id' => $team->id,
+            'team_id' => $messageTeam->id,
             'sent_by' => $user->id,
             'whatsapp_number_id' => $whatsappNumber->id,
 
@@ -1398,16 +1409,31 @@ class MessageController extends Controller
             $team->whatsapp_number_id
         );
 
+        $visibleNumberIds = $this->visibleWhatsappNumberIds($whatsappNumberId);
+
         Message::query()
             ->where('customer_id', $customer->id)
             ->where('direction', 'inbound')
-            ->where('whatsapp_number_id', $whatsappNumberId)
+            ->whereIn('whatsapp_number_id', $visibleNumberIds)
             ->whereNull('read_at')
             ->update([
                 'read_at' => now(),
             ]);
 
         return back();
+    }
+
+    protected function visibleWhatsappNumberIds(?int $normalNumberId): array
+    {
+        $ids = $normalNumberId ? [(int) $normalNumberId] : [];
+        $specialNumberId = app(\App\Services\SpecialSessionService::class)
+            ->specialTeam()?->whatsapp_number_id;
+
+        if ($specialNumberId) {
+            $ids[] = (int) $specialNumberId;
+        }
+
+        return array_values(array_unique($ids));
     }
 
     /*
@@ -1441,7 +1467,9 @@ class MessageController extends Controller
             })
             ->pluck('id');
 
-        $whatsappNumberId = $team->whatsapp_number_id;
+        $visibleNumberIds = $this->visibleWhatsappNumberIds(
+            $team->whatsapp_number_id
+        );
 
         $unreadMessages = Message::query()
             ->whereIn(
@@ -1449,10 +1477,7 @@ class MessageController extends Controller
                 $customerIds
             )
             ->where('direction', 'inbound')
-            ->when(
-                $whatsappNumberId,
-                fn ($query) => $query->where('whatsapp_number_id', $whatsappNumberId)
-            )
+            ->whereIn('whatsapp_number_id', $visibleNumberIds)
             ->whereNull('read_at');
 
         $unreadCount =

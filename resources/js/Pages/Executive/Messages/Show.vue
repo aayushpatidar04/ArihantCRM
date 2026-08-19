@@ -29,10 +29,34 @@ import {
 
 import { usePrivateChannel } from "@/Composables/useEcho";
 import ExecutiveLayout from "@/Components/Layout/ExecutiveLayout.vue";
+import { useToast } from "@/Composables/useToast";
 
 const page = usePage();
+const { success, error } = useToast();
 
-const currentTeam = computed(() => page.props.workspace?.current_team ?? props.customer?.team ?? null);
+const responseErrorMessage = (requestError, fallback) => {
+    const responseData = requestError?.response?.data;
+    const validationError = Object.values(responseData?.errors ?? {})
+        .flat()
+        .find(Boolean);
+
+    return (
+        responseData?.message ||
+        responseData?.failure_reason ||
+        validationError ||
+        (typeof responseData === "string" ? responseData : null) ||
+        requestError?.message ||
+        fallback
+    );
+};
+
+const showWindowClosedError = () => {
+    error("The 24-hour WhatsApp window is closed. Please use a template.");
+};
+
+const currentTeam = computed(
+    () => page.props.workspace?.current_team ?? props.customer?.team ?? null,
+);
 
 const props = defineProps({
     customer: {
@@ -245,7 +269,7 @@ const activeConversationWhatsappNumberId = computed(() => {
     const fromQuery = new URLSearchParams(window.location.search).get(
         "whatsapp_number_id",
     );
-z
+    z;
     if (fromQuery) {
         return Number(fromQuery) || null;
     }
@@ -1181,6 +1205,7 @@ const sendTextMessage = async () => {
     }
 
     if (!canSendNormalMessage.value) {
+        showWindowClosedError();
         return;
     }
 
@@ -1202,8 +1227,10 @@ const sendTextMessage = async () => {
         await appendOwnMessage(response.data.message);
 
         messageText.value = "";
-    } catch (error) {
-        console.error("Unable to send message:", error);
+        success("Message sent.");
+    } catch (requestError) {
+        console.error("Unable to send message:", requestError);
+        error(responseErrorMessage(requestError, "Unable to send message."));
     } finally {
         sending.value = false;
     }
@@ -1231,6 +1258,7 @@ const sendAttachment = async () => {
     }
 
     if (!canSendNormalMessage.value) {
+        showWindowClosedError();
         return;
     }
 
@@ -1264,8 +1292,10 @@ const sendAttachment = async () => {
         selectedFile.value = null;
 
         messageText.value = "";
-    } catch (error) {
-        console.error("Unable to send attachment:", error);
+        success("Media sent.");
+    } catch (requestError) {
+        console.error("Unable to send attachment:", requestError);
+        error(responseErrorMessage(requestError, "Unable to send media."));
     } finally {
         sending.value = false;
     }
@@ -1277,6 +1307,7 @@ const sendTemplate = async () => {
     }
 
     if (templateHasMissingVariables.value) {
+        error("Please fill in all required template variables.");
         return;
     }
 
@@ -1312,8 +1343,10 @@ const sendTemplate = async () => {
         if (windowOpen.value) {
             composerMode.value = "normal";
         }
-    } catch (error) {
-        console.error("Unable to send template:", error);
+        success("Template sent.");
+    } catch (requestError) {
+        console.error("Unable to send template:", requestError);
+        error(responseErrorMessage(requestError, "Unable to send template."));
     } finally {
         sending.value = false;
     }
@@ -1350,121 +1383,109 @@ const markConversationRead = () => {
 |
 */
 
-usePrivateChannel(`whatsapp.team.${currentTeam.value?.id ?? props.customer.team_id}`, {
-    "message.created": (event) => {
-        const message = event.message;
+usePrivateChannel(
+    `whatsapp.team.${currentTeam.value?.id ?? props.customer.team_id}`,
+    {
+        "message.created": (event) => {
+            const message = event.message;
 
-        if (!message) {
-            return;
-        }
+            if (!message) {
+                return;
+            }
 
-        if (Number(message.sent_by) === Number(page.props.auth?.user?.id)) {
-            return;
-        }
+            if (Number(message.sent_by) === Number(page.props.auth?.user?.id)) {
+                return;
+            }
 
-        if (Number(message.customer_id) !== Number(props.customer.id)) {
-            return;
-        }
+            if (Number(message.customer_id) !== Number(props.customer.id)) {
+                return;
+            }
 
-        if (
-            message.whatsapp_number_id &&
-            activeConversationWhatsappNumberId.value &&
-            Number(message.whatsapp_number_id) !== Number(activeConversationWhatsappNumberId.value)
-        ) {
-            return;
-        }
+            if (messageExists(message.id)) {
+                return;
+            }
 
-        if (messageExists(message.id)) {
-            return;
-        }
+            messageList.value.push(normalizeMessage(message));
 
-        messageList.value.push(normalizeMessage(message));
+            sortMessages();
 
-        sortMessages();
+            if (isNearBottom.value) {
+                nextTick(() => {
+                    scrollToBottom();
+                });
+            } else {
+                showJumpToLatest.value = true;
+            }
+        },
 
-        if (isNearBottom.value) {
-            nextTick(() => {
-                scrollToBottom();
-            });
-        } else {
-            showJumpToLatest.value = true;
-        }
+        "message.received": (event) => {
+            const message = event.message;
+
+            if (!message) {
+                return;
+            }
+
+            if (Number(message.customer_id) !== Number(props.customer.id)) {
+                return;
+            }
+
+            if (messageExists(message.id)) {
+                return;
+            }
+
+            if (activeSearch.value || loadingAroundDate.value) {
+                return;
+            }
+
+            messageList.value.push(normalizeMessage(message));
+
+            sortMessages();
+
+            if (message.direction === "inbound") {
+                markConversationRead();
+            }
+
+            if (isNearBottom.value) {
+                nextTick(() => {
+                    scrollToBottom();
+                });
+            } else {
+                showJumpToLatest.value = true;
+            }
+        },
+
+        "message.status.updated": (event) => {
+            const updatedMessage = event.message;
+
+            if (!updatedMessage) {
+                return;
+            }
+
+            if (
+                Number(updatedMessage.customer_id) !== Number(props.customer.id)
+            ) {
+                return;
+            }
+
+            const index = messageList.value.findIndex(
+                (item) => Number(item.id) === Number(updatedMessage.id),
+            );
+
+            if (index === -1) {
+                return;
+            }
+
+            messageList.value[index] = normalizeMessage(updatedMessage);
+
+            if (updatedMessage.status === "failed") {
+                error(
+                    updatedMessage.failure_reason ||
+                        "WhatsApp delivery failed.",
+                );
+            }
+        },
     },
-
-    "message.received": (event) => {
-        const message = event.message;
-
-        if (!message) {
-            return;
-        }
-
-        if (Number(message.customer_id) !== Number(props.customer.id)) {
-            return;
-        }
-
-        if (
-            message.whatsapp_number_id &&
-            activeConversationWhatsappNumberId.value &&
-            Number(message.whatsapp_number_id) !== Number(activeConversationWhatsappNumberId.value)
-        ) {
-            return;
-        }
-
-        if (messageExists(message.id)) {
-            return;
-        }
-
-        if (activeSearch.value || loadingAroundDate.value) {
-            return;
-        }
-
-        messageList.value.push(normalizeMessage(message));
-
-        sortMessages();
-
-        if (message.direction === "inbound") {
-            markConversationRead();
-        }
-
-        if (isNearBottom.value) {
-            nextTick(() => {
-                scrollToBottom();
-            });
-        } else {
-            showJumpToLatest.value = true;
-        }
-    },
-
-    "message.status.updated": (event) => {
-        const updatedMessage = event.message;
-
-        if (!updatedMessage) {
-            return;
-        }
-
-        if (Number(updatedMessage.customer_id) !== Number(props.customer.id)) {
-            return;
-        }
-
-        if (
-            updatedMessage.whatsapp_number_id &&
-            activeConversationWhatsappNumberId.value &&
-            Number(updatedMessage.whatsapp_number_id) !== Number(activeConversationWhatsappNumberId.value)
-        ) {
-            return;
-        }
-
-        const index = messageList.value.findIndex(
-            (item) => Number(item.id) === Number(updatedMessage.id),
-        );
-
-        if (index === -1) {
-            return;
-        }
-
-        messageList.value[index] = normalizeMessage(updatedMessage);
-    },
-});
+);
 
 /*
 |--------------------------------------------------------------------------
@@ -1853,25 +1874,14 @@ const messageBorderClass = (message) => {
                             >
                                 <div
                                     v-if="message.type === 'image'"
-                                    class="overflow-hidden rounded-xl bg-black/5"
+                                    class="relative rounded-xl bg-black/5 w-full h-64 bg-center bg-cover mx-auto"
+                                    :style="{
+                                        backgroundImage: `url(${message.document.url})`,
+                                    }"
                                 >
-                                    <img
-                                        :src="message.document.url"
-                                        :alt="
-                                            message.document
-                                                .original_filename || 'Image'
-                                        "
-                                        class="max-w-full max-h-80 object-contain cursor-pointer mx-auto"
-                                        @click="
-                                            window.open(
-                                                message.document.url,
-                                                '_blank',
-                                            )
-                                        "
-                                    />
-
+                                    <!-- Overlay actions -->
                                     <div
-                                        class="flex items-center justify-end gap-2 px-2 py-2"
+                                        class="absolute bottom-0 right-0 flex items-center gap-2 px-2 py-2 bg-black/40 text-white rounded-bl-xl"
                                     >
                                         <a
                                             :href="message.document.url"
@@ -1903,7 +1913,7 @@ const messageBorderClass = (message) => {
                                     <video
                                         :src="message.document.url"
                                         controls
-                                        class="max-w-full max-h-80"
+                                        class="max-w-full max-h-80 mx-auto"
                                     />
                                 </div>
 

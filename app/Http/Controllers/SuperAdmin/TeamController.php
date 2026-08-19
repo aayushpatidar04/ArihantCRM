@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Models\WhatsappNumber;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
@@ -483,5 +484,33 @@ class TeamController extends Controller
             });
 
         return response()->json($admins);
+    }
+
+    public function syncBitrix()
+    {
+        try {
+            $exitCode = Artisan::call('bitrix:sync');
+
+            $output = Artisan::output();
+
+            if ($exitCode !== 0) {
+                return back()->with(
+                    'error',
+                    'Bitrix synchronization failed.'
+                );
+            }
+
+            return back()->with(
+                'success',
+                'Departments and agents synchronized successfully.'
+            );
+        } catch (\Throwable $e) {
+            report($e);
+
+            return back()->with(
+                'error',
+                'Bitrix synchronization failed: ' . $e->getMessage()
+            );
+        }
     }
 }

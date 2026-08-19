@@ -49,6 +49,8 @@ Route::middleware('auth')->group(function () {
             Route::delete('/teams/{team}/admins/{user}', [TeamController::class, 'destroyAdmin'])->name('teams.admins.destroy');
             Route::get('/teams/{team}/available-admins', [TeamController::class, 'availableAdmins'])->name('teams.available-admins');
 
+            Route::post('/teams/sync-bitrix', [TeamController::class, 'syncBitrix'])->name('teams.sync-bitrix');
+
             Route::prefix('meta-whatsapp-settings')
                 ->name('meta-whatsapp-settings.')
                 ->group(function () {
@@ -156,7 +158,10 @@ Route::middleware('auth')->group(function () {
             Route::get('/messages/{customer}/history', [ExecutiveMessageController::class, 'history'])->name('messages.history');
 
         });
+
+    Route::post('/customers/fetch-bitrix-lead', [DashboardController::class, 'fetchBitrixLead'])->name('customers.fetch-bitrix-lead');
 });
+
 Route::get('/webhooks/meta/whatsapp', [MetaWhatsappWebhookController::class, 'verify'])->name('webhooks.meta.whatsapp.verify');
 Route::post('/webhooks/meta/whatsapp', [MetaWhatsappWebhookController::class, 'handle'])->name('webhooks.meta.whatsapp.handle');
 

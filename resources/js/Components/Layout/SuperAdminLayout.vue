@@ -186,6 +186,7 @@
 
         <!-- Toast -->
         <ToastStack />
+        <FlashToastBridge />
     </div>
 </template>
 
@@ -194,6 +195,7 @@ import { ref } from "vue";
 import { Link } from "@inertiajs/vue3";
 import NavItem from "@/Components/Layout/NavItem.vue";
 import ToastStack from "@/Components/UI/ToastStack.vue";
+import FlashToastBridge from "@/Components/UI/FlashToastBridge.vue";
 import HomeIcon from "@/Components/Icons/HomeIcon.vue";
 import ChevronLeftIcon from "@/Components/Icons/ChevronLeftIcon.vue";
 import ChevronRightIcon from "@/Components/Icons/ChevronRightIcon.vue";

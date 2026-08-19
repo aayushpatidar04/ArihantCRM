@@ -251,8 +251,10 @@ class MessageController extends Controller
             $team->whatsapp_number_id
         );
 
+        $visibleNumberIds = $this->visibleWhatsappNumberIds($conversationNumberId);
+
         $messages = $customer->messages()
-            ->where('whatsapp_number_id', $conversationNumberId)
+            ->whereIn('whatsapp_number_id', $visibleNumberIds)
             ->with([
                 'sentBy:id,name',
                 'team:id,name',
@@ -359,6 +361,19 @@ class MessageController extends Controller
         ]);
     }
 
+    protected function visibleWhatsappNumberIds(?int $normalNumberId): array
+    {
+        $ids = $normalNumberId ? [(int) $normalNumberId] : [];
+        $specialNumberId = app(\App\Services\SpecialSessionService::class)
+            ->specialTeam()?->whatsapp_number_id;
+
+        if ($specialNumberId) {
+            $ids[] = (int) $specialNumberId;
+        }
+
+        return array_values(array_unique($ids));
+    }
+
     /**
      * Send normal text message.
      */
@@ -392,7 +407,8 @@ class MessageController extends Controller
             ],
         ]);
 
-        $number = $team->whatsappNumber;
+        $number = app(\App\Services\SpecialSessionService::class)
+            ->replyNumber($customer, $team);
 
         abort_unless(
             $number && $number->is_active,
@@ -400,10 +416,13 @@ class MessageController extends Controller
             'No active WhatsApp number is assigned to this team.'
         );
 
-        $message = DB::transaction(function () use ($customer, $team, $number, $user, $data) {
+        $messageTeam = app(\App\Services\SpecialSessionService::class)
+            ->messageTeam($number, $team);
+
+        $message = DB::transaction(function () use ($customer, $messageTeam, $number, $user, $data) {
             return Message::create([
                 'customer_id' => $customer->id,
-                'team_id' => $team->id,
+                'team_id' => $messageTeam->id,
                 'whatsapp_number_id' => $number->id,
                 'sent_by' => $user->id,
 
@@ -513,12 +532,9 @@ class MessageController extends Controller
         |
         */
 
-        $whatsappNumberId = Message::query()
-            ->where('customer_id', $customer->id)
-            ->where('team_id', $team->id)
-            ->whereNotNull('whatsapp_number_id')
-            ->latest('id')
-            ->value('whatsapp_number_id');
+        $replyNumber = app(\App\Services\SpecialSessionService::class)
+            ->replyNumber($customer, $team);
+        $whatsappNumberId = $replyNumber?->id;
 
         /*
         |--------------------------------------------------------------------------
@@ -562,6 +578,9 @@ class MessageController extends Controller
                 'The WhatsApp number is unavailable or inactive.'
             );
         }
+
+        $messageTeam = app(\App\Services\SpecialSessionService::class)
+            ->messageTeam($whatsappNumber, $team);
 
         /*
         |--------------------------------------------------------------------------
@@ -642,7 +661,7 @@ class MessageController extends Controller
 
         $message = Message::create([
             'customer_id' => $customer->id,
-            'team_id' => $team->id,
+            'team_id' => $messageTeam->id,
             'whatsapp_number_id' => $whatsappNumber->id,
             'sent_by' => $user->id,
             'direction' => 'outbound',
@@ -775,7 +794,8 @@ class MessageController extends Controller
         |--------------------------------------------------------------------------
         */
 
-        $whatsappNumber = $team->whatsappNumber;
+        $whatsappNumber = app(\App\Services\SpecialSessionService::class)
+            ->replyNumber($customer, $team);
 
         if (!$whatsappNumber) {
             if ($request->expectsJson()) {
@@ -804,6 +824,9 @@ class MessageController extends Controller
                 'The team WhatsApp number is inactive.'
             );
         }
+
+        $messageTeam = app(\App\Services\SpecialSessionService::class)
+            ->messageTeam($whatsappNumber, $team);
 
         /*
         |--------------------------------------------------------------------------
@@ -1084,7 +1107,7 @@ class MessageController extends Controller
 
         $message = Message::create([
             'customer_id' => $customer->id,
-            'team_id' => $team->id,
+            'team_id' => $messageTeam->id,
             'sent_by' => $user->id,
             'whatsapp_number_id' => $whatsappNumber->id,
 

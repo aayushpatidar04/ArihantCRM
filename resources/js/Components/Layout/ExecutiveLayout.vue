@@ -8,6 +8,7 @@ import NavItem from "@/Components/Layout/NavItem.vue";
 import { Bell, UsersIcon, Home, LogOut, InboxIcon, X } from "lucide-vue-next";
 
 import ToastStack from "@/Components/UI/ToastStack.vue";
+import FlashToastBridge from "@/Components/UI/FlashToastBridge.vue";
 
 import { useEcho } from "@/Composables/useEcho";
 
@@ -36,10 +37,6 @@ const user = computed(() => page.props.auth?.user ?? {});
 
 const currentTeam = computed(() => {
     return page.props.workspace?.current_team ?? null;
-});
-
-const activeConversationWhatsappNumberId = computed(() => {
-    return Number(currentTeam.value?.whatsapp_number_id ?? 0) || null;
 });
 
 /*
@@ -278,18 +275,6 @@ const handleRealtimeMessage = (payload) => {
     | Team safety check
     |--------------------------------------------------------------------------
     */
-
-    if (Number(message.team_id) !== Number(currentTeam.value?.id)) {
-        return;
-    }
-
-    if (
-        message.whatsapp_number_id &&
-        activeConversationWhatsappNumberId.value &&
-        Number(message.whatsapp_number_id) !== Number(activeConversationWhatsappNumberId.value)
-    ) {
-        return;
-    }
 
     /*
     |--------------------------------------------------------------------------
@@ -986,5 +971,6 @@ onUnmounted(() => {
         </div>
 
         <ToastStack />
+        <FlashToastBridge />
     </div>
 </template>

@@ -27,12 +27,24 @@ class MessageStatusUpdated implements ShouldBroadcastNow
     {
         $teamIds = [$this->message->team_id];
 
+        $this->message->loadMissing('customer.assignedTo:id,team_id');
+
+        if ($this->message->customer?->team_id) {
+            $teamIds[] = $this->message->customer->team_id;
+        }
+
+        if ($this->message->customer?->assignedTo?->team_id) {
+            $teamIds[] = $this->message->customer->assignedTo->team_id;
+        }
+
         if ($this->message->whatsapp_number_id) {
             $this->message->loadMissing('whatsappNumber.teams');
 
-            $teamIds = $this->message->whatsappNumber?->teams()
+            $numberTeamIds = $this->message->whatsappNumber?->teams()
                 ->pluck('teams.id')
-                ->all() ?? $teamIds;
+                ->all() ?? [];
+
+            $teamIds = array_merge($teamIds, $numberTeamIds);
         }
 
         $teamIds = array_values(array_unique(array_filter(array_map('intval', $teamIds))));

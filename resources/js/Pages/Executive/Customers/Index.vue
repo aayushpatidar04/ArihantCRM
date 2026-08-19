@@ -1,6 +1,11 @@
 <script setup>
-import { Head, Link } from "@inertiajs/vue3";
+import { Head, Link, useForm } from "@inertiajs/vue3";
+import { ref } from "vue";
 import ExecutiveLayout from "@/Components/Layout/ExecutiveLayout.vue";
+import { Download, X } from "lucide-vue-next";
+import Modal from "@/Components/Modal.vue";
+import InputError from "@/Components/InputError.vue";
+import PrimaryButton from "@/Components/PrimaryButton.vue";
 
 const props = defineProps({
     customers: {
@@ -67,6 +72,40 @@ const maskedPhone = (phone) => {
 
     return `${"•".repeat(Math.max(0, value.length - 4))}${value.slice(-4)}`;
 };
+
+const fetchLeadOpen = ref(false);
+
+const fetchLeadForm = useForm({
+    lead_id: "",
+});
+
+const openFetchLeadModal = () => {
+    fetchLeadForm.clearErrors();
+    fetchLeadForm.reset();
+
+    fetchLeadOpen.value = true;
+};
+
+const closeFetchLeadModal = () => {
+    if (fetchLeadForm.processing) {
+        return;
+    }
+
+    fetchLeadOpen.value = false;
+
+    fetchLeadForm.clearErrors();
+    fetchLeadForm.reset();
+};
+
+const fetchBitrixLead = () => {
+    fetchLeadForm.post(route("customers.fetch-bitrix-lead"), {
+        preserveScroll: true,
+
+        onSuccess: () => {
+            closeFetchLeadModal();
+        },
+    });
+};
 </script>
 
 <template>
@@ -88,12 +127,24 @@ const maskedPhone = (phone) => {
                     </p>
                 </div>
 
-                <Link
-                    :href="route('executive.customers.create')"
-                    class="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-slate-600 text-white text-sm font-medium hover:bg-slate-900 transition"
-                >
-                    + Add Customer
-                </Link>
+                <div>
+                    <Link
+                        :href="route('executive.customers.create')"
+                        class="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-slate-600 text-white text-sm font-medium hover:bg-slate-900 transition me-2"
+                    >
+                        + Add Customer
+                    </Link>
+
+                    <button
+                        type="button"
+                        @click="openFetchLeadModal"
+                        class="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100"
+                    >
+                        <Download class="h-4 w-4" />
+
+                        Fetch Bitrix Lead
+                    </button>
+                </div>
             </div>
 
             <!-- Search -->
@@ -334,5 +385,104 @@ const maskedPhone = (phone) => {
                 </template>
             </div>
         </div>
+
+        <Modal
+            :show="fetchLeadOpen"
+            max-width="md"
+            @close="closeFetchLeadModal"
+        >
+            <form
+                class="overflow-hidden rounded-xl bg-white shadow-xl"
+                @submit.prevent="fetchBitrixLead"
+            >
+                <!-- Header -->
+                <div
+                    class="flex items-start justify-between gap-4 border-b border-gray-200 px-6 py-5"
+                >
+                    <div>
+                        <h2 class="text-lg font-semibold text-gray-900">
+                            Fetch Bitrix Lead
+                        </h2>
+
+                        <p class="mt-1 text-sm leading-5 text-gray-500">
+                            Enter a Bitrix Lead ID to create or update the
+                            customer.
+                        </p>
+                    </div>
+
+                    <button
+                        type="button"
+                        class="rounded-lg p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                        @click="closeFetchLeadModal"
+                    >
+                        <X class="h-5 w-5" />
+                    </button>
+                </div>
+
+                <!-- Body -->
+                <div class="px-6 py-6">
+                    <label
+                        for="bitrix-lead-id"
+                        class="block text-sm font-medium text-surface-700 mb-1.5"
+                    >
+                        Bitrix Lead ID
+                    </label>
+
+                    <input
+                        id="bitrix-lead-id"
+                        v-model="fetchLeadForm.lead_id"
+                        type="number"
+                        min="1"
+                        inputmode="numeric"
+                        class="w-full rounded-lg border border-surface-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-500"
+                        placeholder="e.g. 199103"
+                        required
+                    />
+
+                    <InputError
+                        class="mt-2"
+                        :message="fetchLeadForm.errors.lead_id"
+                    />
+
+                    <p
+                        v-if="!fetchLeadForm.errors.lead_id"
+                        class="mt-2 text-xs text-gray-500"
+                    >
+                        The lead will be fetched from Bitrix and automatically
+                        assigned to its current executive and primary team.
+                    </p>
+                </div>
+
+                <!-- Footer -->
+                <div
+                    class="flex items-center justify-end gap-3 border-t border-gray-200 bg-gray-50 px-6 py-4"
+                >
+                    <button
+                        type="button"
+                        class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        :disabled="fetchLeadForm.processing"
+                        @click="closeFetchLeadModal"
+                    >
+                        Cancel
+                    </button>
+
+                    <PrimaryButton
+                        type="submit"
+                        :disabled="
+                            fetchLeadForm.processing || !fetchLeadForm.lead_id
+                        "
+                        class="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                        <Download class="mr-2 h-4 w-4" />
+
+                        {{
+                            fetchLeadForm.processing
+                                ? "Fetching..."
+                                : "Fetch Lead"
+                        }}
+                    </PrimaryButton>
+                </div>
+            </form>
+        </Modal>
     </ExecutiveLayout>
 </template>
