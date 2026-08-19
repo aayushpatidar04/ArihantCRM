@@ -26,15 +26,31 @@ class WhatsAppMessageReceived implements ShouldBroadcastNow
 
     public function broadcastOn(): array
     {
-        return [
-            new PrivateChannel(
-                'team.' . $this->message->team_id . '.messages'
-            ),
+        $teamIds = [$this->message->team_id];
 
-            new PrivateChannel(
-                'customer.' . $this->message->customer_id . '.messages'
-            ),
-        ];
+        if ($this->message->whatsapp_number_id) {
+            $this->message->loadMissing('whatsappNumber.teams');
+
+            $teamIds = $this->message->whatsappNumber?->teams()
+                ->pluck('teams.id')
+                ->all() ?? $teamIds;
+        }
+
+        $teamIds = array_values(array_unique(array_filter(array_map('intval', $teamIds))));
+
+        if ($teamIds === []) {
+            $teamIds = [$this->message->team_id];
+        }
+
+        $channels = [];
+
+        foreach ($teamIds as $teamId) {
+            $channels[] = new PrivateChannel('team.' . $teamId . '.messages');
+        }
+
+        $channels[] = new PrivateChannel('customer.' . $this->message->customer_id . '.messages');
+
+        return $channels;
     }
 
     public function broadcastAs(): string

@@ -32,6 +32,8 @@ import ExecutiveLayout from "@/Components/Layout/ExecutiveLayout.vue";
 
 const page = usePage();
 
+const currentTeam = computed(() => page.props.workspace?.current_team ?? props.customer?.team ?? null);
+
 const props = defineProps({
     customer: {
         type: Object,
@@ -1336,7 +1338,7 @@ const markConversationRead = () => {
 |
 */
 
-usePrivateChannel(`whatsapp.team.${props.customer.team_id}`, {
+usePrivateChannel(`whatsapp.team.${currentTeam.value?.id ?? props.customer.team_id}`, {
     "message.created": (event) => {
         const message = event.message;
 

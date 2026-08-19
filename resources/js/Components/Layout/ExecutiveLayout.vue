@@ -38,6 +38,10 @@ const currentTeam = computed(() => {
     return page.props.workspace?.current_team ?? null;
 });
 
+const activeConversationWhatsappNumberId = computed(() => {
+    return Number(currentTeam.value?.whatsapp_number_id ?? 0) || null;
+});
+
 /*
 |--------------------------------------------------------------------------
 | Sidebar
@@ -225,7 +229,13 @@ const formatNotificationTime = (chat) => {
 const openUnreadChat = (chat) => {
     closeNotifications();
 
-    router.visit(route("executive.messages.show", chat.customer_id));
+    const url = new URL(route("executive.messages.show", chat.customer_id));
+
+    if (chat.whatsapp_number_id) {
+        url.searchParams.set("whatsapp_number_id", String(chat.whatsapp_number_id));
+    }
+
+    router.visit(url.toString());
 };
 
 /*
@@ -270,6 +280,14 @@ const handleRealtimeMessage = (payload) => {
     */
 
     if (Number(message.team_id) !== Number(currentTeam.value?.id)) {
+        return;
+    }
+
+    if (
+        message.whatsapp_number_id &&
+        activeConversationWhatsappNumberId.value &&
+        Number(message.whatsapp_number_id) !== Number(activeConversationWhatsappNumberId.value)
+    ) {
         return;
     }
 

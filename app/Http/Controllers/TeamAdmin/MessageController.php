@@ -13,6 +13,7 @@ use App\Models\Customer;
 use App\Models\Document;
 use App\Models\Message;
 use App\Models\WhatsappNumber;
+use App\Services\MessageSenderContextService;
 use App\Services\MetaWhatsappService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -146,14 +147,7 @@ class MessageController extends Controller
                 'messages as unread_count' => function ($query) use ($whatsappNumber) {
                     $query
                         ->where('direction', 'inbound')
-                        ->whereNull('read_at')
-                        ->when(
-                            $whatsappNumber,
-                            fn ($q) => $q->where(
-                                'whatsapp_number_id',
-                                $whatsappNumber->id
-                            )
-                        );
+                        ->whereNull('read_at');
                 },
             ])
 
@@ -166,13 +160,6 @@ class MessageController extends Controller
             ->with([
                 'messages' => function ($query) use ($whatsappNumber) {
                     $query
-                        ->when(
-                            $whatsappNumber,
-                            fn ($q) => $q->where(
-                                'whatsapp_number_id',
-                                $whatsappNumber->id
-                            )
-                        )
                         ->latest()
                         ->limit(1);
                 },
@@ -189,13 +176,6 @@ class MessageController extends Controller
                     ->whereColumn(
                         'messages.customer_id',
                         'customers.id'
-                    )
-                    ->when(
-                        $whatsappNumber,
-                        fn ($q) => $q->where(
-                            'messages.whatsapp_number_id',
-                            $whatsappNumber->id
-                        )
                     )
                     ->latest()
                     ->limit(1)
@@ -245,6 +225,11 @@ class MessageController extends Controller
             'team.whatsappNumber:id,phone_number,display_phone_number,verified_name,is_active',
         ]);
 
+        $conversationNumberId = $request->integer(
+            'whatsapp_number_id',
+            $team->whatsapp_number_id
+        );
+
         $messages = $customer->messages()
             ->with([
                 'sentBy:id,name',
@@ -254,6 +239,25 @@ class MessageController extends Controller
             ])
             ->limit(30)
             ->get();
+
+        $senderContextService = app(MessageSenderContextService::class);
+
+        $messages = $messages->map(function (Message $message) use ($customer, $senderContextService) {
+            if ($message->direction === 'outbound') {
+                $message->sender_context = $senderContextService->getContext(
+                    $customer,
+                    $message->sent_by
+                );
+            } else {
+                $message->sender_context = [
+                    'type' => null,
+                    'name' => null,
+                    'role' => null,
+                ];
+            }
+
+            return $message;
+        })->values();
 
         /*
          * IMPORTANT:
@@ -277,7 +281,9 @@ class MessageController extends Controller
          */
         $templates = collect();
 
-        $whatsappNumber = $customer->team?->whatsappNumber;
+        $whatsappNumber = $conversationNumberId
+            ? WhatsappNumber::query()->whereKey($conversationNumberId)->first() ?? $team->whatsappNumber
+            : $team->whatsappNumber;
 
         if ($whatsappNumber) {
             $templates = $whatsappNumber
@@ -395,9 +401,16 @@ class MessageController extends Controller
         /*
          * Return immediately.
          */
+        $freshMessage = $message->fresh();
+
+        $freshMessage->sender_context = app(MessageSenderContextService::class)->getContext(
+            $customer,
+            $freshMessage->sent_by
+        );
+
         return response()->json([
             'success' => true,
-            'message' => $message->fresh(),
+            'message' => $freshMessage,
         ], 201);
     }
 
@@ -1360,13 +1373,6 @@ class MessageController extends Controller
             ->where('customer_id', $customer->id)
             ->where('direction', 'inbound')
             ->whereNull('read_at')
-            ->when(
-                $team->whatsapp_number_id,
-                fn($q) => $q->where(
-                    'whatsapp_number_id',
-                    $team->whatsapp_number_id
-                )
-            )
             ->update([
                 'read_at' => now(),
             ]);
@@ -1487,6 +1493,25 @@ class MessageController extends Controller
                 ->sortBy('id')
                 ->values();
 
+            $senderContextService = app(MessageSenderContextService::class);
+
+            $messages = $messages->map(function (Message $message) use ($customer, $senderContextService) {
+                if ($message->direction === 'outbound') {
+                    $message->sender_context = $senderContextService->getContext(
+                        $customer,
+                        $message->sent_by
+                    );
+                } else {
+                    $message->sender_context = [
+                        'type' => null,
+                        'name' => null,
+                        'role' => null,
+                    ];
+                }
+
+                return $message;
+            })->values();
+
             return response()->json([
                 'messages' => $messages,
                 'has_more' => false,
@@ -1508,6 +1533,25 @@ class MessageController extends Controller
                 ->orderBy('id')
                 ->limit($limit)
                 ->get();
+
+            $senderContextService = app(MessageSenderContextService::class);
+
+            $messages = $messages->map(function (Message $message) use ($customer, $senderContextService) {
+                if ($message->direction === 'outbound') {
+                    $message->sender_context = $senderContextService->getContext(
+                        $customer,
+                        $message->sent_by
+                    );
+                } else {
+                    $message->sender_context = [
+                        'type' => null,
+                        'name' => null,
+                        'role' => null,
+                    ];
+                }
+
+                return $message;
+            })->values();
 
             /*
              * We want to know whether there are
@@ -1555,6 +1599,25 @@ class MessageController extends Controller
                 ->sortBy('id')
                 ->values();
 
+            $senderContextService = app(MessageSenderContextService::class);
+
+            $messages = $messages->map(function (Message $message) use ($customer, $senderContextService) {
+                if ($message->direction === 'outbound') {
+                    $message->sender_context = $senderContextService->getContext(
+                        $customer,
+                        $message->sent_by
+                    );
+                } else {
+                    $message->sender_context = [
+                        'type' => null,
+                        'name' => null,
+                        'role' => null,
+                    ];
+                }
+
+                return $message;
+            })->values();
+
             return response()->json([
                 'messages' => $messages,
 
@@ -1577,6 +1640,25 @@ class MessageController extends Controller
             ->get()
             ->sortBy('id')
             ->values();
+
+        $senderContextService = app(MessageSenderContextService::class);
+
+        $messages = $messages->map(function (Message $message) use ($customer, $senderContextService) {
+            if ($message->direction === 'outbound') {
+                $message->sender_context = $senderContextService->getContext(
+                    $customer,
+                    $message->sent_by
+                );
+            } else {
+                $message->sender_context = [
+                    'type' => null,
+                    'name' => null,
+                    'role' => null,
+                ];
+            }
+
+            return $message;
+        })->values();
 
         return response()->json([
             'messages' => $messages,

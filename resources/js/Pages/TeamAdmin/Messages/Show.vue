@@ -32,6 +32,8 @@ import TeamAdminLayout from "@/Components/Layout/TeamAdminLayout.vue";
 
 const page = usePage();
 
+const currentTeam = computed(() => page.props.workspace?.current_team ?? props.customer?.team ?? null);
+
 const props = defineProps({
     customer: {
         type: Object,
@@ -1374,7 +1376,7 @@ const markConversationRead = () => {
 |--------------------------------------------------------------------------
 */
 
-usePrivateChannel(`whatsapp.team.${props.customer.team_id}`, {
+usePrivateChannel(`whatsapp.team.${currentTeam.value?.id ?? props.customer.team_id}`, {
     "message.created": (event) => {
         const message = event.message;
 
@@ -1525,6 +1527,26 @@ watch(selectedTemplate, () => {
 
     initializeTemplatePreview();
 });
+
+const messageBorderClass = (message) => {
+    if (message.direction !== "outbound") {
+        return "border-surface-200";
+    }
+
+    switch (message.sender_context?.type) {
+        case "assigned":
+            return "border-emerald-400";
+
+        case "old_owner":
+            return "border-red-400";
+
+        case "team_admin":
+            return "border-blue-400";
+
+        default:
+            return "border-transparent";
+    }
+};
 </script>
 
 <template>
@@ -1825,12 +1847,13 @@ watch(selectedTemplate, () => {
                         "
                     >
                         <div
-                            class="rounded-2xl px-4 py-2.5 shadow-[0_1px_1px_rgba(0,0,0,0.04)]"
+                            class="group relative rounded-2xl px-4 py-2.5 border-2 shadow-[0_1px_1px_rgba(0,0,0,0.04)]"
                             :class="[
                                 message.document ? 'w-[40%]' : 'max-w-[60%]',
                                 message.direction === 'outbound'
                                 ? 'bg-[#dffcd9] text-black rounded-br-md'
-                                : 'bg-white border border-surface-200 text-surface-900 rounded-bl-md'
+                                : 'bg-white text-surface-900 rounded-bl-md',
+                                messageBorderClass(message),
                             ]"
                         >
                             <!-- Media -->
@@ -2009,6 +2032,18 @@ watch(selectedTemplate, () => {
                                     "
                                     class="w-3 h-3 text-red-500"
                                 />
+                            </div>
+
+                            <div
+                                v-if="
+                                    message.direction === 'outbound' &&
+                                    message.sender_context?.name
+                                "
+                                class="absolute top-full right-0 mt-1 z-30 whitespace-nowrap px-2.5 py-1 rounded-md bg-surface-900 text-white text-[10px] font-medium shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 pointer-events-none"
+                            >
+                                {{ message.sender_context.name }}
+                                ·
+                                {{ message.sender_context.role }}
                             </div>
                         </div>
                     </div>

@@ -3,6 +3,7 @@
 namespace App\Events;
 
 use App\Models\Message;
+use App\Services\MessageSenderContextService;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
@@ -18,30 +19,32 @@ class MessageStatusUpdated implements ShouldBroadcastNow
     ) {
         $this->message->loadMissing([
             'document',
+            'customer',
         ]);
     }
 
     public function broadcastOn(): array
     {
-        $customer = $this->message->customer;
+        $teamIds = [$this->message->team_id];
 
-        $teamIds = collect([
-            $this->message->team_id,
-            $customer?->team_id,
-            $customer?->assignedTo?->team_id,
-            $customer?->oldOwner?->team_id,
-        ])
-            ->filter()
-            ->unique()
-            ->values();
+        if ($this->message->whatsapp_number_id) {
+            $this->message->loadMissing('whatsappNumber.teams');
 
-        return $teamIds
-            ->map(function ($teamId) {
-                return new PrivateChannel(
-                    'whatsapp.team.' . $teamId
-                );
-            })
-            ->all();
+            $teamIds = $this->message->whatsappNumber?->teams()
+                ->pluck('teams.id')
+                ->all() ?? $teamIds;
+        }
+
+        $teamIds = array_values(array_unique(array_filter(array_map('intval', $teamIds))));
+
+        if ($teamIds === []) {
+            $teamIds = [$this->message->team_id];
+        }
+
+        return array_map(
+            fn (int $teamId) => new PrivateChannel('whatsapp.team.' . $teamId),
+            $teamIds
+        );
     }
 
     public function broadcastAs(): string

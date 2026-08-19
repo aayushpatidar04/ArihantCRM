@@ -11,11 +11,23 @@ class Message extends Model
     use HasFactory;
     use SoftDeletes;
 
+    protected static function booted(): void
+    {
+        static::creating(function (Message $message): void {
+            if ($message->direction === 'outbound') {
+                $message->conversation_user_id ??= $message->sent_by;
+                $message->conversation_team_id ??= $message->team_id;
+            }
+        });
+    }
+
     protected $fillable = [
         'customer_id',
         'team_id',
         'whatsapp_number_id',
         'sent_by',
+        'conversation_user_id',
+        'conversation_team_id',
         'whatsapp_message_id',
         'direction',
         'type',
@@ -89,6 +101,16 @@ class Message extends Model
             User::class,
             'sent_by'
         );
+    }
+
+    public function conversationUser()
+    {
+        return $this->belongsTo(User::class, 'conversation_user_id');
+    }
+
+    public function conversationTeam()
+    {
+        return $this->belongsTo(Team::class, 'conversation_team_id');
     }
 
     /*

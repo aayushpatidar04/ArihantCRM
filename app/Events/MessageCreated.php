@@ -24,11 +24,26 @@ class MessageCreated implements ShouldBroadcastNow
 
     public function broadcastOn(): array
     {
-        return [
-            new PrivateChannel(
-                'whatsapp.team.' . $this->message->team_id
-            ),
-        ];
+        $teamIds = [$this->message->team_id];
+
+        if ($this->message->whatsapp_number_id) {
+            $this->message->loadMissing('whatsappNumber.teams');
+
+            $teamIds = $this->message->whatsappNumber?->teams()
+                ->pluck('teams.id')
+                ->all() ?? $teamIds;
+        }
+
+        $teamIds = array_values(array_unique(array_filter(array_map('intval', $teamIds))));
+
+        if ($teamIds === []) {
+            $teamIds = [$this->message->team_id];
+        }
+
+        return array_map(
+            fn (int $teamId) => new PrivateChannel('whatsapp.team.' . $teamId),
+            $teamIds
+        );
     }
 
     public function broadcastAs(): string

@@ -260,6 +260,9 @@ class MetaWhatsappWebhookService
             return;
         }
 
+        $participant = app(ConversationParticipantService::class)
+            ->resolveInbound($customer, $whatsappNumber);
+
         $type = $this->resolveMessageType(
             $message
         );
@@ -286,6 +289,9 @@ class MetaWhatsappWebhookService
                 $whatsappNumber->id,
 
             'sent_by' => null,
+
+            'conversation_user_id' => $participant['user_id'],
+            'conversation_team_id' => $participant['team_id'],
 
             'whatsapp_message_id' =>
                 $whatsappMessageId,
