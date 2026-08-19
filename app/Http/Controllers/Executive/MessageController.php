@@ -110,7 +110,14 @@ class MessageController extends Controller
                 'messages as unread_count' => function ($query) use ($whatsappNumber) {
                     $query
                         ->where('direction', 'inbound')
-                        ->whereNull('read_at');
+                        ->whereNull('read_at')
+                        ->when(
+                            $whatsappNumber,
+                            fn($q) => $q->where(
+                                'whatsapp_number_id',
+                                $whatsappNumber->id
+                            )
+                        );
                 },
             ])
 
@@ -123,6 +130,13 @@ class MessageController extends Controller
             ->with([
                 'messages' => function ($query) use ($whatsappNumber) {
                     $query
+                        ->when(
+                            $whatsappNumber,
+                            fn($q) => $q->where(
+                                'whatsapp_number_id',
+                                $whatsappNumber->id
+                            )
+                        )
                         ->latest()
                         ->limit(1);
                 },
@@ -139,6 +153,13 @@ class MessageController extends Controller
                     ->whereColumn(
                         'messages.customer_id',
                         'customers.id'
+                    )
+                    ->when(
+                        $whatsappNumber,
+                        fn($q) => $q->where(
+                            'messages.whatsapp_number_id',
+                            $whatsappNumber->id
+                        )
                     )
                     ->latest()
                     ->limit(1)
@@ -219,6 +240,7 @@ class MessageController extends Controller
         */
 
         $messages = $customer->messages()
+            ->where('whatsapp_number_id', $conversationNumberId)
             ->with([
                 'sentBy:id,name',
                 'team:id,name',
@@ -283,6 +305,10 @@ class MessageController extends Controller
 
         $lastInboundMessage = $customer->messages()
             ->where('direction', 'inbound')
+            ->where(
+                'whatsapp_number_id',
+                $conversationNumberId
+            )
             ->latest('created_at')
             ->first();
 
@@ -331,6 +357,7 @@ class MessageController extends Controller
 
         $totalMessages = Message::query()
             ->where('customer_id', $customer->id)
+            ->where('whatsapp_number_id', $conversationNumberId)
             ->count();
 
         $hasMoreMessages =
@@ -449,6 +476,7 @@ class MessageController extends Controller
 
         $messages = Message::query()
             ->where('customer_id', $customer->id)
+            ->where('whatsapp_number_id', $whatsappNumberId)
             ->with([
                 'customer:id,name,phone',
                 'sentBy:id,name',
@@ -555,6 +583,7 @@ class MessageController extends Controller
 
         Message::query()
             ->where('customer_id', $customer->id)
+            ->where('whatsapp_number_id', $whatsappNumberId)
             ->where('direction', 'inbound')
             ->whereNull('read_at')
             ->update([
@@ -1372,6 +1401,7 @@ class MessageController extends Controller
         Message::query()
             ->where('customer_id', $customer->id)
             ->where('direction', 'inbound')
+            ->where('whatsapp_number_id', $whatsappNumberId)
             ->whereNull('read_at')
             ->update([
                 'read_at' => now(),
@@ -1411,12 +1441,18 @@ class MessageController extends Controller
             })
             ->pluck('id');
 
+        $whatsappNumberId = $team->whatsapp_number_id;
+
         $unreadMessages = Message::query()
             ->whereIn(
                 'customer_id',
                 $customerIds
             )
             ->where('direction', 'inbound')
+            ->when(
+                $whatsappNumberId,
+                fn ($query) => $query->where('whatsapp_number_id', $whatsappNumberId)
+            )
             ->whereNull('read_at');
 
         $unreadCount =

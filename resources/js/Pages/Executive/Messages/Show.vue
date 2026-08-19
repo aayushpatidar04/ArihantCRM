@@ -241,6 +241,18 @@ const customerTeam = computed(() => {
     return props.customer?.team?.name || "—";
 });
 
+const activeConversationWhatsappNumberId = computed(() => {
+    const fromQuery = new URLSearchParams(window.location.search).get(
+        "whatsapp_number_id",
+    );
+z
+    if (fromQuery) {
+        return Number(fromQuery) || null;
+    }
+
+    return Number(props.customer?.team?.whatsapp_number_id ?? 0) || null;
+});
+
 const whatsappNumber = computed(() => {
     return (
         props.customer?.team?.whatsapp_number?.display_phone_number ||
@@ -1354,6 +1366,14 @@ usePrivateChannel(`whatsapp.team.${currentTeam.value?.id ?? props.customer.team_
             return;
         }
 
+        if (
+            message.whatsapp_number_id &&
+            activeConversationWhatsappNumberId.value &&
+            Number(message.whatsapp_number_id) !== Number(activeConversationWhatsappNumberId.value)
+        ) {
+            return;
+        }
+
         if (messageExists(message.id)) {
             return;
         }
@@ -1379,6 +1399,14 @@ usePrivateChannel(`whatsapp.team.${currentTeam.value?.id ?? props.customer.team_
         }
 
         if (Number(message.customer_id) !== Number(props.customer.id)) {
+            return;
+        }
+
+        if (
+            message.whatsapp_number_id &&
+            activeConversationWhatsappNumberId.value &&
+            Number(message.whatsapp_number_id) !== Number(activeConversationWhatsappNumberId.value)
+        ) {
             return;
         }
 
@@ -1415,6 +1443,14 @@ usePrivateChannel(`whatsapp.team.${currentTeam.value?.id ?? props.customer.team_
         }
 
         if (Number(updatedMessage.customer_id) !== Number(props.customer.id)) {
+            return;
+        }
+
+        if (
+            updatedMessage.whatsapp_number_id &&
+            activeConversationWhatsappNumberId.value &&
+            Number(updatedMessage.whatsapp_number_id) !== Number(activeConversationWhatsappNumberId.value)
+        ) {
             return;
         }
 

@@ -147,7 +147,14 @@ class MessageController extends Controller
                 'messages as unread_count' => function ($query) use ($whatsappNumber) {
                     $query
                         ->where('direction', 'inbound')
-                        ->whereNull('read_at');
+                        ->whereNull('read_at')
+                        ->when(
+                            $whatsappNumber,
+                            fn ($q) => $q->where(
+                                'whatsapp_number_id',
+                                $whatsappNumber->id
+                            )
+                        );
                 },
             ])
 
@@ -160,6 +167,13 @@ class MessageController extends Controller
             ->with([
                 'messages' => function ($query) use ($whatsappNumber) {
                     $query
+                        ->when(
+                            $whatsappNumber,
+                            fn ($q) => $q->where(
+                                'whatsapp_number_id',
+                                $whatsappNumber->id
+                            )
+                        )
                         ->latest()
                         ->limit(1);
                 },
@@ -176,6 +190,13 @@ class MessageController extends Controller
                     ->whereColumn(
                         'messages.customer_id',
                         'customers.id'
+                    )
+                    ->when(
+                        $whatsappNumber,
+                        fn ($q) => $q->where(
+                            'messages.whatsapp_number_id',
+                            $whatsappNumber->id
+                        )
                     )
                     ->latest()
                     ->limit(1)
@@ -231,6 +252,7 @@ class MessageController extends Controller
         );
 
         $messages = $customer->messages()
+            ->where('whatsapp_number_id', $conversationNumberId)
             ->with([
                 'sentBy:id,name',
                 'team:id,name',
@@ -264,6 +286,7 @@ class MessageController extends Controller
          * 24-hour window is based ONLY on the latest inbound message.
          */
         $lastInboundMessage = $customer->messages()
+            ->where('whatsapp_number_id', $conversationNumberId)
             ->where('direction', 'inbound')
             ->latest('created_at')
             ->first();
@@ -304,7 +327,9 @@ class MessageController extends Controller
         $totalMessages = Message::where(
             'customer_id',
             $customer->id
-        )->count();
+        )
+            ->where('whatsapp_number_id', $conversationNumberId)
+            ->count();
 
         $hasMoreMessages = $totalMessages > $messages->count();
 
@@ -1369,9 +1394,15 @@ class MessageController extends Controller
             $team->id
         );
 
+        $whatsappNumberId = $request->integer(
+            'whatsapp_number_id',
+            $team->whatsapp_number_id
+        );
+
         Message::query()
             ->where('customer_id', $customer->id)
             ->where('direction', 'inbound')
+            ->where('whatsapp_number_id', $whatsappNumberId)
             ->whereNull('read_at')
             ->update([
                 'read_at' => now(),
