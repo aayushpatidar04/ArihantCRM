@@ -12,7 +12,6 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('whatsapp_numbers', function (Blueprint $table) {
-            $table->foreignId('meta_whatsapp_setting_id')->constrained('meta_whatsapp_settings')->restrictOnDelete();
             $table->timestamp('access_token_expires_at')->nullable();
         });
         Schema::table('messages', function (Blueprint $table) {
