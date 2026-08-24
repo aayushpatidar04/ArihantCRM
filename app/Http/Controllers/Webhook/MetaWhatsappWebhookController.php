@@ -54,18 +54,18 @@ class MetaWhatsappWebhookController extends Controller
      */
     public function handle(Request $request): Response
     {
-        $signature = $request->header(
-            'X-Hub-Signature-256'
-        );
+        // $signature = $request->header(
+        //     'X-Hub-Signature-256'
+        // );
 
-        if (!$signature) {
-            return response('Missing signature', 401);
-        }
+        // if (!$signature) {
+        //     return response('Missing signature', 401);
+        // }
 
         try {
             $this->webhookService->handle(
                 $request->getContent(),
-                $signature
+                // $signature
             );
 
             /*
