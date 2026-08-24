@@ -19,7 +19,7 @@ return new class extends Migration
             $table->foreignId('whatsapp_number_id')->nullable()->constrained('whatsapp_numbers')->nullOnDelete();
             $table->string('whatsapp_message_id')->nullable()->unique(); // from gateway
             $table->enum('direction', ['inbound', 'outbound']);
-            $table->enum('type', ['text', 'image', 'document', 'audio', 'video', 'sticker', 'location', 'contact', 'chat'])->default('chat');
+            $table->enum('type', ['text', 'image', 'document', 'audio', 'video', 'sticker', 'location', 'contact', 'chat', 'reaction'])->default('chat');
             $table->text('body')->nullable();
             $table->enum('status', ['pending', 'queued', 'sent', 'delivered', 'read', 'failed'])->default('pending');
             $table->string('gateway_job_id')->nullable();

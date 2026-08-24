@@ -29,7 +29,8 @@ class Message extends Model
         'media_mime_type',
         'media_filename',
         'media_caption',
-        'metadata'
+        'metadata',
+        'reaction_to_message_id',
     ];
 
     protected function casts(): array
@@ -110,5 +111,21 @@ class Message extends Model
     public function isOutbound(): bool
     {
         return $this->direction === 'outbound';
+    }
+
+    public function reactionToMessage()
+    {
+        return $this->belongsTo(
+            self::class,
+            'reaction_to_message_id'
+        );
+    }
+
+    public function reactions()
+    {
+        return $this->hasMany(
+            self::class,
+            'reaction_to_message_id'
+        );
     }
 }

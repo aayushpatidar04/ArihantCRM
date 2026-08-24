@@ -167,6 +167,7 @@ class MessageController extends Controller
             ->with([
                 'messages' => function ($query) use ($whatsappNumber) {
                     $query
+                        ->where('type', '!=', 'reaction')
                         ->when(
                             $whatsappNumber,
                             fn ($q) => $q->where(
@@ -255,11 +256,15 @@ class MessageController extends Controller
 
         $messages = $customer->messages()
             ->whereIn('whatsapp_number_id', $visibleNumberIds)
+            ->where('type', '!=', 'reaction')
             ->with([
                 'sentBy:id,name',
                 'team:id,name',
                 'whatsappNumber:id,phone_number,display_phone_number',
                 'document',
+                'reactions' => function ($query) {
+                    $query->latest();
+                },
             ])
             ->limit(30)
             ->get();
@@ -330,7 +335,8 @@ class MessageController extends Controller
             'customer_id',
             $customer->id
         )
-            ->where('whatsapp_number_id', $conversationNumberId)
+            ->whereIn('whatsapp_number_id', $visibleNumberIds)
+            ->where('type', '!=', 'reaction')
             ->count();
 
         $hasMoreMessages = $totalMessages > $messages->count();
@@ -1508,17 +1514,29 @@ class MessageController extends Controller
             403
         );
 
+        $whatsappNumberId = $request->integer(
+            'whatsapp_number_id',
+            $team->whatsapp_number_id
+        );
+
+        $visibleNumberIds = $this->visibleWhatsappNumberIds($whatsappNumberId);
+
         $limit = min(
             max((int) $request->input('limit', 30), 1),
             100
         );
 
         $query = $customer->messages()
+            ->whereIn('whatsapp_number_id', $visibleNumberIds)
+            ->where('type', '!=', 'reaction')
             ->with([
                 'sentBy:id,name',
                 'team:id,name',
                 'whatsappNumber:id,phone_number,display_phone_number',
                 'document',
+                'reactions' => function ($query) {
+                    $query->latest();
+                },
             ]);
 
         /*
@@ -1617,6 +1635,8 @@ class MessageController extends Controller
 
             if ($firstMessage) {
                 $hasMore = $customer->messages()
+                    ->whereIn('whatsapp_number_id', $visibleNumberIds)
+                    ->where('type', '!=', 'reaction')
                     ->where('id', '<', $firstMessage->id)
                     ->exists();
             }
@@ -1719,6 +1739,8 @@ class MessageController extends Controller
 
             'has_more' =>
                 $customer->messages()
+                        ->whereIn('whatsapp_number_id', $visibleNumberIds)
+                        ->where('type', '!=', 'reaction')
                     ->where(
                         'id',
                         '<',

@@ -130,6 +130,7 @@ class MessageController extends Controller
             ->with([
                 'messages' => function ($query) use ($whatsappNumber) {
                     $query
+                        ->where('type', '!=', 'reaction')
                         ->when(
                             $whatsappNumber,
                             fn($q) => $q->where(
@@ -243,11 +244,15 @@ class MessageController extends Controller
 
         $messages = $customer->messages()
             ->whereIn('whatsapp_number_id', $visibleNumberIds)
+            ->where('type', '!=', 'reaction')
             ->with([
                 'sentBy:id,name',
                 'team:id,name',
                 'whatsappNumber:id,phone_number,display_phone_number',
                 'document',
+                'reactions' => function ($query) {
+                    $query->latest();
+                },
             ])
             ->latest()
             ->limit(30)
@@ -361,6 +366,7 @@ class MessageController extends Controller
         $totalMessages = Message::query()
             ->where('customer_id', $customer->id)
             ->whereIn('whatsapp_number_id', $visibleNumberIds)
+            ->where('type', '!=', 'reaction')
             ->count();
 
         $hasMoreMessages =
@@ -482,11 +488,15 @@ class MessageController extends Controller
         $messages = Message::query()
             ->where('customer_id', $customer->id)
             ->whereIn('whatsapp_number_id', $visibleNumberIds)
+            ->where('type', '!=', 'reaction')
             ->with([
                 'customer:id,name,phone',
                 'sentBy:id,name',
                 'whatsappNumber:id,phone_number,display_phone_number',
                 'document',
+                'reactions' => function ($query) {
+                    $query->latest();
+                },
             ])
             ->orderBy('created_at')
             ->get()
@@ -556,6 +566,8 @@ class MessageController extends Controller
                         : null,
 
                     'sender_context' => $senderContext,
+
+                    'reactions' => $message->reactions,
 
                     'document' => $message->document
                         ? [

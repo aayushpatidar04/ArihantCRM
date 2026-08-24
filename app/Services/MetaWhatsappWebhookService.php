@@ -271,6 +271,56 @@ class MetaWhatsappWebhookService
             $message
         );
 
+        if ($type === 'reaction') {
+            $reactionMessage = $this->handleReaction(
+                messageData: $message,
+                customer: $customer,
+                teamId: $specialTeam?->id ?? $customer->team_id
+            );
+
+            if (!$reactionMessage) {
+                return;
+            }
+
+            /*
+            * A reaction is an inbound WhatsApp interaction,
+            * so it refreshes the 24-hour customer service window.
+            */
+            $customer->update([
+                'last_contacted_at' => now(),
+            ]);
+
+            /*
+            * Load the same relationships used by normal
+            * inbound messages.
+            */
+            $reactionMessage->load([
+                'customer',
+                'sentBy:id,name',
+                'team:id,name',
+                'whatsappNumber:id,phone_number,display_phone_number',
+                'reactionToMessage',
+            ]);
+
+            /*
+            * Broadcast the reaction so the currently open
+            * chat updates immediately.
+            */
+            broadcast(
+                new NewInboundMessage(
+                    $reactionMessage
+                )
+            );
+
+            broadcast(
+                new WhatsAppMessageReceived(
+                    $reactionMessage
+                )
+            );
+
+            return;
+        }
+
         $body = $this->resolveMessageBody(
             $message,
             $type
@@ -302,7 +352,7 @@ class MetaWhatsappWebhookService
             'type' => $type,
 
             'body' => $body,
-
+            'metadata' => $message,
             'status' => 'delivered',
         ]);
 
@@ -362,6 +412,115 @@ class MetaWhatsappWebhookService
                 $dbMessage
             )
         );
+    }
+
+    private function handleReaction(
+        array $messageData,
+        Customer $customer,
+        ?int $teamId = null
+    ): ?Message {
+        $reaction = $messageData['reaction'] ?? null;
+
+        $targetWhatsappMessageId =
+            $reaction['message_id'] ?? null;
+
+        $emoji =
+            $reaction['emoji'] ?? null;
+
+        if (!$targetWhatsappMessageId) {
+            return null;
+        }
+
+        /*
+        * ---------------------------------------------------------
+        * FIND ORIGINAL MESSAGE
+        * ---------------------------------------------------------
+        */
+
+        $originalMessage = Message::query()
+            ->where(
+                'whatsapp_message_id',
+                $targetWhatsappMessageId
+            )
+            ->first();
+
+        if (!$originalMessage) {
+            return null;
+        }
+
+        /*
+        * ---------------------------------------------------------
+        * REMOVE PREVIOUS REACTION FROM SAME CUSTOMER
+        * ON SAME MESSAGE
+        * ---------------------------------------------------------
+        *
+        * One WhatsApp number can have only one reaction
+        * on a particular message.
+        */
+
+        Message::query()
+            ->where(
+                'customer_id',
+                $customer->id
+            )
+            ->where(
+                'reaction_to_message_id',
+                $originalMessage->id
+            )
+            ->where(
+                'type',
+                'reaction'
+            )
+            ->delete();
+
+        /*
+        * ---------------------------------------------------------
+        * CREATE NEW REACTION
+        * ---------------------------------------------------------
+        */
+
+        $reactionMessage = Message::create([
+            'customer_id' =>
+                $customer->id,
+
+            'team_id' =>
+                $teamId ?? $originalMessage->team_id,
+
+            'sent_by' =>
+                null,
+
+            'whatsapp_number_id' =>
+                $originalMessage->whatsapp_number_id,
+
+            'whatsapp_message_id' =>
+                $messageData['id'] ?? null,
+
+            'direction' =>
+                'inbound',
+
+            /*
+            * Keeping emoji in body is useful for fallback
+            * and makes debugging easier.
+            */
+            'body' =>
+                $emoji,
+
+            'status' =>
+                'received',
+
+            'type' =>
+                'reaction',
+
+            'reaction_to_message_id' =>
+                $originalMessage->id,
+
+            /*
+            * Store complete webhook data.
+            */
+            'metadata' => $messageData,
+        ]);
+
+        return $reactionMessage;
     }
 
     /*
@@ -818,6 +977,9 @@ class MetaWhatsappWebhookService
 
             'contacts' =>
             'contact',
+
+            'reaction' =>
+            'reaction',
 
             default =>
             'chat',

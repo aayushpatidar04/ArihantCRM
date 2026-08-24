@@ -1399,6 +1399,46 @@ const markConversationRead = () => {
     );
 };
 
+const handleRealtimeReaction = (reaction) => {
+    if (!reaction) {
+        return;
+    }
+
+    const targetMessageId = Number(reaction.reaction_to_message_id);
+
+    if (!targetMessageId) {
+        return;
+    }
+
+    const targetIndex = messageList.value.findIndex(
+        (message) => Number(message.id) === targetMessageId,
+    );
+
+    if (targetIndex === -1) {
+        return;
+    }
+
+    const targetMessage = messageList.value[targetIndex];
+
+    const existingReactions = Array.isArray(targetMessage.reactions)
+        ? targetMessage.reactions
+        : [];
+
+    const reactionCustomerId = Number(reaction.customer_id);
+
+    const reactionsWithoutPrevious = existingReactions.filter(
+        (existingReaction) =>
+            Number(existingReaction.customer_id) !== reactionCustomerId,
+    );
+
+    reactionsWithoutPrevious.push(normalizeMessage(reaction));
+
+    messageList.value[targetIndex] = {
+        ...targetMessage,
+        reactions: reactionsWithoutPrevious,
+    };
+};
+
 /*
 |--------------------------------------------------------------------------
 | Realtime events
@@ -1476,6 +1516,13 @@ usePrivateChannel(`whatsapp.team.${currentTeam.value?.id ?? props.customer.team_
         }
 
         if (Number(message.customer_id) !== Number(props.customer.id)) {
+            return;
+        }
+
+        if (message.type === "reaction") {
+            handleRealtimeReaction(message);
+            markConversationRead();
+
             return;
         }
 
@@ -2077,6 +2124,32 @@ const messageBorderClass = (message) => {
                                 {{ message.sender_context.name }}
                                 ·
                                 {{ message.sender_context.role }}
+                            </div>
+
+                            <div
+                                v-if="
+                                    Array.isArray(message.reactions) &&
+                                    message.reactions.length
+                                "
+                                class="flex flex-wrap gap-1 -mt-1 px-2"
+                                :class="
+                                    message.direction === 'outbound'
+                                        ? 'justify-end'
+                                        : 'justify-start'
+                                "
+                            >
+                                <div
+                                    v-for="reaction in message.reactions"
+                                    :key="reaction.id"
+                                    class="inline-flex items-center rounded-full border border-surface-200 bg-white px-1.5 py-0.5 shadow-sm"
+                                >
+                                    <span
+                                        class="text-base leading-none"
+                                        :title="reaction.body"
+                                    >
+                                        {{ reaction.body }}
+                                    </span>
+                                </div>
                             </div>
                         </div>
                     </div>
