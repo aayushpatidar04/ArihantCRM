@@ -16,7 +16,6 @@ return new class extends Migration
             $table->string('name');
             $table->string('slug')->unique();
             $table->foreignId('whatsapp_number_id')->nullable()->constrained('whatsapp_numbers')->nullOnDelete();
-            $table->foreignId('last_assigned_executive_id')->nullable()->constrained('users')->nullOnDelete();
             $table->foreignId('parent_team_id')->nullable()->constrained('teams')->nullOnDelete();
             $table->string('external_department_id')->nullable();
             $table->boolean('is_active')->default(true);

@@ -43,6 +43,10 @@ return new class extends Migration {
             $table->longText('payload');
             $table->integer('last_activity')->index();
         });
+
+        Schema::table('teams', function (Blueprint $table) {
+            $table->foreignId('last_assigned_executive_id')->nullable()->constrained('users')->nullOnDelete();
+        });
     }
 
     /**
