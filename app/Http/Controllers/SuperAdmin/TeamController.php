@@ -171,7 +171,7 @@ class TeamController extends Controller
             ->orderBy('name')
             ->get();
 
-        $whatsappNumbers = WhatsAppNumber::query()
+        $whatsappNumbers = WhatsappNumber::query()
             ->where('is_active', true)
             ->select([
                 'id',

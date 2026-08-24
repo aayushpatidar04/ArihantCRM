@@ -46,7 +46,7 @@ class MetaWhatsappSetting extends Model
     public function whatsappNumbers()
     {
         return $this->hasMany(
-            WhatsAppNumber::class,
+            WhatsappNumber::class,
             'meta_whatsapp_setting_id'
         );
     }
