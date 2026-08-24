@@ -804,9 +804,7 @@ class BitrixSyncCommand extends Command
                 $user = new User();
 
                 $user->bitrix_user_id = $bitrixUserId;
-                $user->password = Hash::make(
-                    Str::random(40)
-                );
+                $user->password = Hash::make('Arihant@123');
             }
 
             $user->name = $this->getAgentName($agent);

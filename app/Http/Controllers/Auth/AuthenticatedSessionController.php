@@ -42,8 +42,13 @@ class AuthenticatedSessionController extends Controller
 
         $user->update(['last_seen_at' => now()]);
         $request->session()->regenerate();
+        $request->session()->forget('two_factor_verified');
 
-        return redirect()->intended(route('dashboard'));
+        if (!$user->two_factor_confirmed_at) {
+            return redirect()->route('two-factor.setup');
+        }
+
+        return redirect()->route('two-factor.challenge');
     }
 
     public function destroy(Request $request): RedirectResponse
