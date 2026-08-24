@@ -182,22 +182,22 @@ class BitrixLeadService
         }
 
         /*
-         * ---------------------------------------------------------
-         * OLD OWNER
-         * ---------------------------------------------------------
-         *
-         * Bitrix Observers represent the old owner.
-         *
-         * Observers may contain:
-         *
-         * - one ID
-         * - multiple IDs
-         * - comma separated IDs
-         * - semicolon separated IDs
-         * - pipe separated IDs
-         *
-         * We resolve the first matching local user.
-         */
+        * ---------------------------------------------------------
+        * OLD OWNER
+        * ---------------------------------------------------------
+        *
+        * Bitrix returns a single observer ID.
+        *
+        * Example:
+        *
+        * "Observers": "51"
+        *
+        * This maps to:
+        *
+        * users.bitrix_user_id
+        *
+        * The mapped local user is stored as old_owner_id.
+        */
         $observerUser = $this->resolveObserverUser(
             $lead['Observers'] ?? null
         );
@@ -719,59 +719,20 @@ class BitrixLeadService
      *
      * The first matching local user is returned.
      */
-    private function resolveObserverUser(
-        mixed $observers
-    ): ?User {
-        if (
-            $observers === null ||
-            $observers === ''
-        ) {
+    private function resolveObserverUser(mixed $observer): ?User
+    {
+        if ($observer === null || $observer === '') {
             return null;
         }
 
-        /*
-         * Already an array.
-         */
-        if (is_array($observers)) {
-            $observerIds =
-                $observers;
-        }
+        $observerId = trim((string) $observer);
 
-        /*
-         * String / single value.
-         */ else {
-            $observerIds =
-                preg_split(
-                    '/[,;|]+/',
-                    (string) $observers
-                );
-        }
-
-        $observerIds = collect(
-            $observerIds
-        )
-            ->map(
-                fn($value) =>
-                trim(
-                    (string) $value
-                )
-            )
-            ->filter(
-                fn($value) =>
-                $value !== ''
-            )
-            ->unique()
-            ->values();
-
-        if ($observerIds->isEmpty()) {
+        if ($observerId === '') {
             return null;
         }
 
         return User::query()
-            ->whereIn(
-                'bitrix_user_id',
-                $observerIds->all()
-            )
+            ->where('bitrix_user_id', $observerId)
             ->first();
     }
 
