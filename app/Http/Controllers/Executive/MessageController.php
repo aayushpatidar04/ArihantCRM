@@ -191,7 +191,8 @@ class MessageController extends Controller
     |--------------------------------------------------------------------------
     */
 
-    public function show(Request $request, Customer $customer): Response {
+    public function show(Request $request, Customer $customer): Response
+    {
         $user = $request->user();
 
         abort_unless(
@@ -271,10 +272,7 @@ class MessageController extends Controller
         );
 
         $messages = $messages->map(
-            function (Message $message) use (
-                $customer,
-                $senderContextService
-            ) {
+            function (Message $message) use ($customer, $senderContextService) {
                 /*
                 |--------------------------------------------------------------------------
                 | Only outbound messages need sender context.
@@ -387,6 +385,58 @@ class MessageController extends Controller
             $customer->phone
         );
 
+
+        $sidebarSearch = trim(
+            (string) $request->input('search', '')
+        );
+
+        $sidebarCustomers = Customer::query()
+            ->where(function ($query) use ($user) {
+                $query
+                    ->where('assigned_to', $user->id)
+                    ->orWhere('old_owner_id', $user->id);
+            })
+            ->when($sidebarSearch !== '', function ($query) use ($sidebarSearch) {
+                $query->where(function ($q) use ($sidebarSearch) {
+                    $q
+                        ->where('name', 'like', "%{$sidebarSearch}%")
+                        ->orWhere('phone', 'like', "%{$sidebarSearch}%")
+                        ->orWhere('email', 'like', "%{$sidebarSearch}%");
+                });
+            })
+            ->withCount([
+                'messages as unread_count' => function ($query) use ($visibleNumberIds) {
+                    $query
+                        ->where('direction', 'inbound')
+                        ->whereNull('read_at')
+                        ->whereIn('whatsapp_number_id', $visibleNumberIds);
+                },
+            ])
+            ->with([
+                'messages' => function ($query) use ($visibleNumberIds) {
+                    $query
+                        ->where('type', '!=', 'reaction')
+                        ->whereIn('whatsapp_number_id', $visibleNumberIds)
+                        ->latest()
+                        ->limit(1);
+                },
+            ])
+            ->orderByDesc(
+                Message::select('created_at')
+                    ->whereColumn(
+                        'messages.customer_id',
+                        'customers.id'
+                    )
+                    ->whereIn(
+                        'messages.whatsapp_number_id',
+                        $visibleNumberIds
+                    )
+                    ->latest()
+                    ->limit(1)
+            )
+            ->paginate(30)
+            ->withQueryString();
+
         /*
         |--------------------------------------------------------------------------
         | Return page
@@ -416,7 +466,13 @@ class MessageController extends Controller
                     'last_inbound_at' =>
                         $lastInboundMessage
                             ?->created_at
-                            ?->toIso8601String(),
+                                ?->toIso8601String(),
+                ],
+
+                'customers' => $sidebarCustomers,
+
+                'filters' => [
+                    'search' => $sidebarSearch,
                 ],
             ]
         );
@@ -826,10 +882,10 @@ class MessageController extends Controller
         | Resolve WhatsApp number
         |--------------------------------------------------------------------------
         */
-        
+
         $replyNumber = app(\App\Services\SpecialSessionService::class)
             ->replyNumber($customer, $team);
-        
+
         $whatsappNumberId = $replyNumber?->id;
 
         abort_unless(

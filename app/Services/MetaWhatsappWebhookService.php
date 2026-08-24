@@ -58,7 +58,7 @@ class MetaWhatsappWebhookService
     |--------------------------------------------------------------------------
     */
 
-    public function handle(string $payload, ): void {
+    public function handle(string $payload, $signature): void {
         $data = json_decode(
             $payload,
             true
@@ -110,6 +110,12 @@ class MetaWhatsappWebhookService
                 /*
                  * Signature verification can be enabled here.
                  */
+                $appSecret = $setting->app_secret;
+                $this->verifySignature(
+                    $payload,
+                    $signature,
+                    $appSecret
+                );
 
                 $setting->update([
                     'last_webhook_at' => now(),

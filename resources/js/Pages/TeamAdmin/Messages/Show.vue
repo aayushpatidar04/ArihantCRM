@@ -30,6 +30,7 @@ import {
 import { usePrivateChannel } from "@/Composables/useEcho";
 import TeamAdminLayout from "@/Components/Layout/TeamAdminLayout.vue";
 import { useToast } from "@/Composables/useToast";
+import Sidebar from "@/Pages/Executive/Messages/Sidebar.vue";
 
 const page = usePage();
 const { success, error } = useToast();
@@ -84,6 +85,25 @@ const props = defineProps({
         default: () => ({
             has_more: false,
             next_cursor: null,
+        }),
+    },
+
+    customers: {
+        type: Object,
+        default: () => ({
+            data: [],
+            next_page_url: null,
+            prev_page_url: null,
+            current_page: 1,
+            last_page: 1,
+            total: 0,
+        }),
+    },
+
+    filters: {
+        type: Object,
+        default: () => ({
+            search: "",
         }),
     },
 });
@@ -1633,7 +1653,24 @@ const messageBorderClass = (message) => {
     <Head :title="customer.name" />
 
     <TeamAdminLayout :title="customer.name">
-        <div class="h-[calc(120vh-80px)] flex flex-col min-h-0">
+        <div
+            class="h-[calc(100vh-80px)] min-h-0 flex flex-row gap-0 overflow-hidden"
+        >
+            <aside
+                class="hidden lg:flex w-[300px] xl:w-[300px] shrink-0 min-h-0 border border-surface-200 rounded-l-xl overflow-hidden bg-white"
+            >
+                <Sidebar
+                    :customers="customers"
+                    :active-customer-id="customer.id"
+                    :initial-search="filters?.search || ''"
+                    search-route="team-admin.messages.show"
+                    show-route="team-admin.messages.show"
+                />
+            </aside>
+
+            <main
+                class="flex-1 min-w-0 min-h-0 overflow-y-auto hide-scrollbar flex flex-col bg-surface-50"
+            >
             <!-- ========================================================= -->
             <!-- HEADER -->
             <!-- ========================================================= -->
@@ -1842,7 +1879,7 @@ const messageBorderClass = (message) => {
 
             <div
                 ref="messagesContainer"
-                class="relative flex-1 min-h-0 overflow-y-auto px-2 sm:px-4 py-5 space-y-3"
+                class="relative flex-1 min-h-[60vh] thin-green-scrollbar overflow-y-auto px-2 sm:px-4 py-5 space-y-3"
             >
                 <div
                     v-if="loadingOlderMessages"
@@ -2890,6 +2927,7 @@ const messageBorderClass = (message) => {
                     </div>
                 </div>
             </div>
+            </main>
         </div>
     </TeamAdminLayout>
 </template>

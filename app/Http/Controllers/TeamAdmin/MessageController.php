@@ -343,6 +343,53 @@ class MessageController extends Controller
 
         $nextCursor = $messages->first()?->id;
 
+        $sidebarSearch = trim(
+            (string) $request->input('search', '')
+        );
+
+        $sidebarCustomers = Customer::query()
+            ->where('team_id', $team->id)
+            ->when($sidebarSearch !== '', function ($query) use ($sidebarSearch) {
+                $query->where(function ($q) use ($sidebarSearch) {
+                    $q
+                        ->where('name', 'like', "%{$sidebarSearch}%")
+                        ->orWhere('phone', 'like', "%{$sidebarSearch}%")
+                        ->orWhere('email', 'like', "%{$sidebarSearch}%");
+                });
+            })
+            ->withCount([
+                'messages as unread_count' => function ($query) use ($visibleNumberIds) {
+                    $query
+                        ->where('direction', 'inbound')
+                        ->whereNull('read_at')
+                        ->whereIn('whatsapp_number_id', $visibleNumberIds);
+                },
+            ])
+            ->with([
+                'messages' => function ($query) use ($visibleNumberIds) {
+                    $query
+                        ->where('type', '!=', 'reaction')
+                        ->whereIn('whatsapp_number_id', $visibleNumberIds)
+                        ->latest()
+                        ->limit(1);
+                },
+            ])
+            ->orderByDesc(
+                Message::select('created_at')
+                    ->whereColumn(
+                        'messages.customer_id',
+                        'customers.id'
+                    )
+                    ->whereIn(
+                        'messages.whatsapp_number_id',
+                        $visibleNumberIds
+                    )
+                    ->latest()
+                    ->limit(1)
+            )
+            ->paginate(30)
+            ->withQueryString();
+
         return Inertia::render('TeamAdmin/Messages/Show', [
             'customer' => $customer,
 
@@ -363,6 +410,12 @@ class MessageController extends Controller
 
                 'last_inbound_at' =>
                     $lastInboundMessage?->created_at?->toIso8601String(),
+            ],
+
+            'customers' => $sidebarCustomers,
+
+            'filters' => [
+                'search' => $sidebarSearch,
             ],
         ]);
     }
