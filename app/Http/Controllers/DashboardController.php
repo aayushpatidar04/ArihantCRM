@@ -131,25 +131,12 @@ class DashboardController extends Controller
                 ];
             });
 
-        // $teamGrowth = Team::select(
-        //         DB::raw(
-        //             "DATE_FORMAT(created_at, '%Y-%m') as month"
-        //         ),
-        //         DB::raw('COUNT(*) as total')
-        //     )
-        //     ->where(
-        //         'created_at',
-        //         '>=',
-        //         now()->subMonths(6)->startOfMonth()
-        //     )
-        //     ->groupBy('month')
-        //     ->orderBy('month')
-        //     ->get();
-
         $teamGrowth = Team::select(
-            DB::raw("strftime('%Y-%m', created_at) as month"),
-            DB::raw('COUNT(*) as total')
-        )
+                DB::raw(
+                    "DATE_FORMAT(created_at, '%Y-%m') as month"
+                ),
+                DB::raw('COUNT(*) as total')
+            )
             ->where(
                 'created_at',
                 '>=',
@@ -158,6 +145,19 @@ class DashboardController extends Controller
             ->groupBy('month')
             ->orderBy('month')
             ->get();
+
+        // $teamGrowth = Team::select(
+        //     DB::raw("strftime('%Y-%m', created_at) as month"),
+        //     DB::raw('COUNT(*) as total')
+        // )
+        //     ->where(
+        //         'created_at',
+        //         '>=',
+        //         now()->subMonths(6)->startOfMonth()
+        //     )
+        //     ->groupBy('month')
+        //     ->orderBy('month')
+        //     ->get();
 
 
         return Inertia::render(
