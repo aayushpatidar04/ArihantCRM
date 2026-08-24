@@ -24,14 +24,6 @@ class BitrixWebhookController extends Controller
             'data.FIELDS.ID'
         );
 
-        Log::info(
-            'Bitrix24 Webhook received',
-            [
-                'event' => $event,
-                'lead_id' => $leadId,
-            ]
-        );
-
         if (!$leadId) {
             Log::warning(
                 'Bitrix24 Webhook: No Lead ID found.'
@@ -195,15 +187,7 @@ class BitrixWebhookController extends Controller
         }
 
         $customer->delete();
-
-        Log::info(
-            "Customer soft-deleted for lead {$leadId}",
-            [
-                'customer_id' =>
-                    $customer->id,
-            ]
-        );
-
+        
         return response()->json([
             'status' =>
                 'success',

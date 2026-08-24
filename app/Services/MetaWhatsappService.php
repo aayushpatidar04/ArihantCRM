@@ -223,26 +223,6 @@ class MetaWhatsappService
                 array_values($components);
         }
 
-        Log::info(
-            'Sending WhatsApp template',
-            [
-                'whatsapp_number_id' =>
-                    $whatsappNumber->id,
-
-                'template_id' =>
-                    $template->id,
-
-                'template_name' =>
-                    $template->name,
-
-                'to' => $to,
-
-                'components' =>
-                    $payload['template']['components']
-                        ?? [],
-            ]
-        );
-
         return $this->sendMessageRequest(
             $whatsappNumber,
             $payload

@@ -737,24 +737,6 @@ class WhatsAppNumberController extends Controller
                 'messages.0.id'
             );
 
-            /*
-             * For the initial Super Admin test, we don't
-             * necessarily have a customer_id.
-             *
-             * Therefore don't force creation in messages yet
-             * unless your messages.customer_id is nullable.
-             */
-            Log::info(
-                'WhatsApp template sent successfully.',
-                [
-                    'whatsapp_number_id' => $whatsappNumber->id,
-                    'template_id' => $whatsappTemplate->id,
-                    'template_name' => $whatsappTemplate->name,
-                    'to' => $data['to'],
-                    'wamid' => $wamid,
-                ]
-            );
-
             return back()->with(
                 'success',
                 'Template sent successfully.'

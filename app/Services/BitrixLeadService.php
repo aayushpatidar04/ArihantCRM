@@ -82,19 +82,6 @@ class BitrixLeadService
             );
         }
 
-        Log::info(
-            'Bitrix lead fetched from API.',
-            [
-                'lead_id' => $leadId,
-
-                'assigned_by_id' =>
-                    $lead['AssignedById'] ?? null,
-
-                'observers' =>
-                    $lead['Observers'] ?? null,
-            ]
-        );
-
         return $lead;
     }
 
@@ -451,88 +438,6 @@ class BitrixLeadService
 
                     $action = 'created';
                 }
-
-                /*
-                 * -----------------------------------------------------
-                 * LOG
-                 * -----------------------------------------------------
-                 */
-                Log::info(
-                    'Bitrix customer synchronized.',
-                    [
-                        'source' =>
-                            $source,
-
-                        'lead_id' =>
-                            $leadId,
-
-                        'customer_id' =>
-                            $customer->id,
-
-                        /*
-                         * Bitrix ownership
-                         */
-                        'bitrix_assigned_by_id' =>
-                            $assignedById,
-
-                        /*
-                         * Local ownership
-                         */
-                        'assigned_user_id' =>
-                            $assignedTo,
-
-                        'assigned_user_name' =>
-                            $assignedUser->name,
-
-                        /*
-                         * Current team
-                         */
-                        'previous_team_id' =>
-                            $previousTeamId,
-
-                        'new_team_id' =>
-                            $teamId,
-
-                        /*
-                         * Old owner
-                         */
-                        'previous_old_owner_id' =>
-                            $previousOldOwnerId,
-
-                        'new_old_owner_id' =>
-                            $oldOwnerId,
-
-                        /*
-                         * Current owner
-                         */
-                        'previous_assigned_to' =>
-                            $previousAssignedTo,
-
-                        'new_assigned_to' =>
-                            $assignedTo,
-
-                        /*
-                         * Change indicators
-                         */
-                        'assignment_changed' =>
-                            (int) $previousAssignedTo !==
-                            (int) $assignedTo,
-
-                        'team_changed' =>
-                            (int) $previousTeamId !==
-                            (int) $teamId,
-
-                        'old_owner_changed' =>
-                            (int) $previousOldOwnerId !==
-                            (int) $oldOwnerId,
-
-                        'observer_found' =>
-                            (bool) $observerUser,
-
-                        'action' =>
-                            $action,
-                    ]
-                );
 
                 /*
                  * -----------------------------------------------------
