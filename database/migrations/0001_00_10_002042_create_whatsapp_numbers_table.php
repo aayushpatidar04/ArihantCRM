@@ -10,8 +10,8 @@ return new class extends Migration
     {
         Schema::create('whatsapp_numbers', function (Blueprint $table) {
             $table->id();
-
             // Meta / WhatsApp Business data
+            $table->foreignId('meta_whatsapp_setting_id')->constrained('meta_whatsapp_settings')->cascadeOnDelete();
             $table->string('phone_number_id')->unique();
             $table->string('waba_id')->nullable();
             $table->string('business_account_id')->nullable();
