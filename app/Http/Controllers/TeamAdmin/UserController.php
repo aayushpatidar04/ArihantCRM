@@ -319,6 +319,29 @@ class UserController extends Controller
         );
     }
 
+    public function resetTwoFactor(User $user): RedirectResponse
+    {
+        /*
+        * Make sure the Team Admin can only reset users
+        * they are authorized to manage.
+        *
+        * If you already have authorization logic in this
+        * controller, use the same logic here.
+        */
+
+        $user->update([
+            'two_factor_secret' => null,
+            'two_factor_recovery_codes' => null,
+            'two_factor_confirmed_at' => null,
+        ]);
+
+        return back()->with(
+            'success',
+            "Two-factor authentication has been reset for {$user->name}. " .
+            "The user will need to configure Google Authenticator again on the next login."
+        );
+    }
+
     /**
      * Resolve current workspace.
      */

@@ -58,6 +58,29 @@ const deleteUser = (user) => {
         preserveScroll: true,
     });
 };
+
+const resetTwoFactor = (user) => {
+    if (
+        !confirm(
+            `Are you sure you want to reset Google Authenticator for ${user.name}? ` +
+            'The existing authenticator will stop working immediately, ' +
+            'and the user will need to set up 2FA again on their next login.'
+        )
+    ) {
+        return;
+    }
+
+    router.post(
+        route(
+            'team-admin.users.reset-two-factor',
+            user.id
+        ),
+        {},
+        {
+            preserveScroll: true,
+        }
+    );
+};
 </script>
 
 <template>
@@ -234,6 +257,15 @@ const deleteUser = (user) => {
                                             class="text-sm font-medium text-red-600 hover:text-red-700"
                                         >
                                             Delete
+                                        </button>
+
+                                        <button
+                                            type="button"
+                                            @click="resetTwoFactor(user)"
+                                            class="inline-flex items-center px-3 py-1.5 text-xs font-medium rounded-md
+                                                bg-orange-50 text-orange-700 hover:bg-orange-100"
+                                        >
+                                            Reset 2FA
                                         </button>
                                     </div>
                                 </td>
