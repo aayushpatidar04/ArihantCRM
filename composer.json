@@ -21,7 +21,7 @@
         "spatie/laravel-permission": "^6.0",
         "tightenco/ziggy": "^2.0",
         "pragmarx/google2fa-laravel": "^2.0",
-        "endroid/qr-code": "^6.0"
+        "endroid/qr-code": "^5.0"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

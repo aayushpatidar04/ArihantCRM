@@ -35,19 +35,19 @@ class TwoFactorController extends Controller
         $issuerParam = rawurlencode($issuer);
         $uri = "otpauth://totp/{$label}?secret={$user->two_factor_secret}&issuer={$issuerParam}&algorithm=SHA1&digits=6&period=30";
 
-        // $result = Builder::create()
-        //     ->writer(new SvgWriter())
-        //     ->data($uri)
-        //     ->size(260)
-        //     ->margin(10)
-        //     ->build();
+        $result = Builder::create()
+            ->writer(new SvgWriter())
+            ->data($uri)
+            ->size(260)
+            ->margin(10)
+            ->build();
 
-        $result = (new Builder(
-            writer: new SvgWriter(),
-            size: 260,
-            margin: 10,
-            data: $uri
-        ))->build();
+        // $result = (new Builder(
+        //     writer: new SvgWriter(),
+        //     size: 260,
+        //     margin: 10,
+        //     data: $uri
+        // ))->build();
 
         return Inertia::render('Auth/TwoFactorSetup', [
             'configured' => false,
