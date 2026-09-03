@@ -39,12 +39,13 @@ class MetaWhatsappWebhookController extends Controller
             $this->webhookService->verifyToken(
                 $verifyToken
             );
-
+            \Log::info($challenge);
             return response(
                 $challenge,
                 200
             );
         } catch (RuntimeException $e) {
+            \Log::info($e);
             return response(
                 'Forbidden',
                 403
