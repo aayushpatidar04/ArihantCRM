@@ -39,9 +39,14 @@ class MetaWhatsappWebhookService
     public function verifyToken(string $verifyToken): MetaWhatsappSetting
     {
         $setting = MetaWhatsappSetting::query()
-            ->where('verify_token', $verifyToken)
             ->where('is_active', true)
-            ->first();
+            ->get()
+            ->first(
+                fn (MetaWhatsappSetting $setting): bool => hash_equals(
+                    $setting->verify_token,
+                    $verifyToken
+                )
+            );
 
         if (!$setting) {
             throw new RuntimeException(
