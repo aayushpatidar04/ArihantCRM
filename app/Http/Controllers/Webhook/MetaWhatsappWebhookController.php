@@ -20,9 +20,6 @@ class MetaWhatsappWebhookController extends Controller
      */
     public function verify(Request $request): Response
     {
-        \Log::info('Meta webhook verification request', [
-            'query' => $request->query(),
-        ]);
         $mode = $request->query('hub_mode');
         $verifyToken = $request->query('hub_verify_token');
         $challenge = $request->query('hub_challenge');
@@ -39,13 +36,11 @@ class MetaWhatsappWebhookController extends Controller
             $this->webhookService->verifyToken(
                 $verifyToken
             );
-            \Log::info($challenge);
             return response(
                 $challenge,
                 200
             );
         } catch (RuntimeException $e) {
-            \Log::info($e);
             return response(
                 'Forbidden',
                 403
