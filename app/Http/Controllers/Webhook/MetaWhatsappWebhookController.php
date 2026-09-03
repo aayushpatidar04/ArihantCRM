@@ -20,6 +20,9 @@ class MetaWhatsappWebhookController extends Controller
      */
     public function verify(Request $request): Response
     {
+        \Log::info('Meta webhook verification request', [
+            'query' => $request->query(),
+        ]);
         $mode = $request->query('hub_mode');
         $verifyToken = $request->query('hub_verify_token');
         $challenge = $request->query('hub_challenge');
