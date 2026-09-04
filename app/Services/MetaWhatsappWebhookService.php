@@ -399,37 +399,71 @@ class MetaWhatsappWebhookService
          *
          * The Document needs message_id.
          */
-        $dbMessage = Message::create([
-            'customer_id' => $customer->id,
+        try {
+            $dbMessage = Message::create([
+                'customer_id' => $customer->id,
 
+                /*
+                 * Keep the current customer's assigned team.
+                 */
+                'team_id' => $specialTeam?->id ?? $customer->team_id,
+
+                'whatsapp_number_id' =>
+                    $whatsappNumber->id,
+
+                'sent_by' => null,
+
+                'whatsapp_message_id' =>
+                    $whatsappMessageId,
+
+                'direction' => 'inbound',
+
+                'type' => $type,
+
+                'body' => $body,
+                'metadata' => $message,
+                'status' => 'delivered',
+            ]);
+
+            Log::info('Inbound message created', [
+                'message_id' => $dbMessage->id,
+                'whatsapp_message_id' => $whatsappMessageId,
+                'type' => $type,
+                'customer_id' => $customer->id,
+            ]);
+
+        } catch (\Illuminate\Database\QueryException $e) {
             /*
-             * Keep the current customer's assigned team.
+             * If message creation fails due to duplicate, it means
+             * another webhook process already created it.
+             * Fetch and use that message instead.
              */
-            'team_id' => $specialTeam?->id ?? $customer->team_id,
+            if ($e->getCode() === '23000' || str_contains($e->getMessage(), 'Duplicate')) {
+                Log::info('Message already created by concurrent request, using existing message', [
+                    'whatsapp_message_id' => $whatsappMessageId,
+                ]);
 
-            'whatsapp_number_id' =>
-                $whatsappNumber->id,
+                $dbMessage = Message::query()
+                    ->where('whatsapp_message_id', $whatsappMessageId)
+                    ->first();
 
-            'sent_by' => null,
-
-            'whatsapp_message_id' =>
-                $whatsappMessageId,
-
-            'direction' => 'inbound',
-
-            'type' => $type,
-
-            'body' => $body,
-            'metadata' => $message,
-            'status' => 'delivered',
-        ]);
-
-        Log::info('Inbound message created', [
-            'message_id' => $dbMessage->id,
-            'whatsapp_message_id' => $whatsappMessageId,
-            'type' => $type,
-            'customer_id' => $customer->id,
-        ]);
+                if (!$dbMessage) {
+                    Log::error('Could not find concurrent message after duplicate error', [
+                        'whatsapp_message_id' => $whatsappMessageId,
+                        'error' => $e->getMessage(),
+                    ]);
+                    return;
+                }
+            } else {
+                Log::error('Failed to create inbound message', [
+                    'whatsapp_message_id' => $whatsappMessageId,
+                    'customer_id' => $customer->id,
+                    'error' => $e->getMessage(),
+                    'code' => $e->getCode(),
+                ]);
+                throw $e;
+            }
+        }
 
         /*
          * Media messages need to be downloaded from Meta
@@ -977,41 +1011,121 @@ class MetaWhatsappWebhookService
             return null;
         }
 
+        /*
+         * First, try to find existing customer with this phone.
+         * Check both formats: with and without leading +
+         */
         $customer = Customer::query()
             ->where(function ($query) use ($phone) {
-
                 $query
                     ->where('phone', $phone)
-                    ->orWhere(
-                        'phone',
-                        '+' . $phone
-                    );
+                    ->orWhere('phone', '+' . $phone);
             })
             ->first();
 
         if ($customer) {
+            \Log::debug('Found existing customer', [
+                'customer_id' => $customer->id,
+                'phone' => $phone,
+            ]);
             return $customer;
         }
 
+        /*
+         * Customer doesn't exist, create new one.
+         * Use firstOrCreate to avoid race conditions when multiple
+         * webhooks arrive simultaneously for the same phone number.
+         */
         $assignment = $this->resolveRoundRobinAssignment($whatsappNumber);
 
         if (!$assignment) {
+            \Log::warning('Could not resolve round-robin assignment', [
+                'phone' => $phone,
+                'whatsapp_number_id' => $whatsappNumber->id,
+            ]);
             return null;
         }
 
-        $name =
-            $contact['profile']['name']
-            ?? $phone;
+        $name = $contact['profile']['name'] ?? $phone;
 
-        return DB::transaction(function () use ($name, $phone, $assignment) {
-            return Customer::create([
-                'name' => $name,
+        try {
+            /*
+             * Use firstOrCreate with transaction to atomically handle
+             * the race condition where two webhooks arrive for same phone.
+             */
+            $customer = DB::transaction(function () use ($name, $phone, $assignment) {
+                /*
+                 * Double-check inside transaction to catch any customer
+                 * that was created between our last check and this transaction.
+                 */
+                $existing = Customer::query()
+                    ->where(function ($query) use ($phone) {
+                        $query
+                            ->where('phone', $phone)
+                            ->orWhere('phone', '+' . $phone);
+                    })
+                    ->first();
+
+                if ($existing) {
+                    \Log::debug('Customer created by concurrent request, using that', [
+                        'customer_id' => $existing->id,
+                        'phone' => $phone,
+                    ]);
+                    return $existing;
+                }
+
+                $newCustomer = Customer::create([
+                    'name' => $name,
+                    'phone' => $phone,
+                    'team_id' => $assignment['team_id'],
+                    'assigned_to' => $assignment['user_id'],
+                    'status' => 'active',
+                ]);
+
+                \Log::info('Created new customer from webhook', [
+                    'customer_id' => $newCustomer->id,
+                    'phone' => $phone,
+                    'name' => $name,
+                ]);
+
+                return $newCustomer;
+            });
+
+            return $customer;
+
+        } catch (\Illuminate\Database\QueryException $e) {
+            /*
+             * Handle duplicate key errors gracefully.
+             * This can still happen if there's a race condition at the database level.
+             * In this case, fetch the customer that was created by the other process.
+             */
+            if ($e->getCode() === '23000' || str_contains($e->getMessage(), 'Duplicate entry')) {
+                \Log::warning('Duplicate customer creation detected, fetching existing customer', [
+                    'phone' => $phone,
+                    'error' => $e->getMessage(),
+                ]);
+
+                $customer = Customer::query()
+                    ->where(function ($query) use ($phone) {
+                        $query
+                            ->where('phone', $phone)
+                            ->orWhere('phone', '+' . $phone);
+                    })
+                    ->first();
+
+                if ($customer) {
+                    return $customer;
+                }
+            }
+
+            \Log::error('Failed to create customer', [
                 'phone' => $phone,
-                'team_id' => $assignment['team_id'],
-                'assigned_to' => $assignment['user_id'],
-                'status' => 'active',
+                'error' => $e->getMessage(),
+                'code' => $e->getCode(),
             ]);
-        });
+
+            throw $e;
+        }
     }
 
     /*

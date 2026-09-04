@@ -227,7 +227,7 @@ const formatTime = (value) => {
 
             <div
                 v-else
-                class="bg-white border border-surface-200 rounded-xl overflow-hidden"
+                class="bg-white border border-surface-200 rounded-xl overflow-y-auto h-[90vh]"
             >
                 <Link
                     v-for="customer in customers"
