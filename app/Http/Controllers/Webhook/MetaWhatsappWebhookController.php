@@ -60,6 +60,7 @@ class MetaWhatsappWebhookController extends Controller
         // if (!$signature) {
         //     return response('Missing signature', 401);
         // }
+        \Log::info('Meta Webhook Received: ' . $request->getContent());
 
         try {
             $this->webhookService->handle(
