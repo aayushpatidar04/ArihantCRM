@@ -20,6 +20,7 @@ class MetaWhatsappWebhookController extends Controller
      */
     public function verify(Request $request): Response
     {
+        \Log::info('Meta Webhook Verification: ' . $request->getContent());
         $mode = $request->query('hub_mode');
         $verifyToken = $request->query('hub_verify_token');
         $challenge = $request->query('hub_challenge');
@@ -60,20 +61,32 @@ class MetaWhatsappWebhookController extends Controller
         // if (!$signature) {
         //     return response('Missing signature', 401);
         // }
-        \Log::info('Meta Webhook Received: ' . $request->getContent());
+        $payload = $request->getContent();
+        \Log::info('Meta Webhook Received', [
+            'size' => strlen($payload),
+            'content_type' => $request->header('Content-Type'),
+        ]);
 
         try {
             $this->webhookService->handle(
-                $request->getContent(),
+                $payload,
                 // $signature
             );
 
             /*
              * Meta expects a fast 200 response.
              */
+            \Log::info('Webhook processed successfully');
             return response('EVENT_RECEIVED', 200);
 
         } catch (RuntimeException $e) {
+
+            \Log::error('Webhook processing failed', [
+                'error' => $e->getMessage(),
+                'code' => $e->getCode(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
 
             report($e);
 

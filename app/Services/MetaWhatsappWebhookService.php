@@ -66,14 +66,23 @@ class MetaWhatsappWebhookService
     public function handle(string $payload, 
         // $signature
     ): void {
+        \Log::debug('Meta Webhook Processing', [
+            'payload_length' => strlen($payload),
+            'timestamp' => now(),
+        ]);
+
         $data = json_decode(
             $payload,
             true
         );
 
         if (!is_array($data)) {
+            \Log::error('Invalid Meta webhook payload', [
+                'payload' => $payload,
+                'json_error' => json_last_error_msg(),
+            ]);
             throw new RuntimeException(
-                'Invalid Meta webhook payload.'
+                'Invalid Meta webhook payload: ' . json_last_error_msg()
             );
         }
 
@@ -81,7 +90,11 @@ class MetaWhatsappWebhookService
 
             foreach ($entry['changes'] ?? [] as $change) {
 
-                if (($change['field'] ?? null) !== 'messages') {
+                $changeField = $change['field'] ?? null;
+                if ($changeField !== 'messages') {
+                    \\Log::debug('Skipping non-message change', [
+                        'field' => $changeField,
+                    ]);
                     continue;
                 }
 
@@ -92,6 +105,7 @@ class MetaWhatsappWebhookService
                     ?? null;
 
                 if (!$phoneNumberId) {
+                    \\Log::warning('Phone number ID missing in webhook change');
                     continue;
                 }
 
@@ -104,6 +118,9 @@ class MetaWhatsappWebhookService
                     ->first();
 
                 if (!$whatsappNumber) {
+                    \\Log::warning('WhatsApp number not found', [
+                        'phone_number_id' => $phoneNumberId,
+                    ]);
                     continue;
                 }
 
@@ -111,6 +128,11 @@ class MetaWhatsappWebhookService
                     $whatsappNumber->metaWhatsappSetting;
 
                 if (!$setting || !$setting->is_active) {
+                    \\Log::warning('Meta WhatsApp setting not active', [
+                        'whatsapp_number_id' => $whatsappNumber->id,
+                        'has_setting' => (bool) $setting,
+                        'is_active' => $setting?->is_active,
+                    ]);
                     continue;
                 }
 
@@ -131,6 +153,12 @@ class MetaWhatsappWebhookService
                 /*
                  * Inbound messages.
                  */
+                $messageCount = count($value['messages'] ?? []);
+                \\Log::info('Processing inbound messages from webhook', [
+                    'count' => $messageCount,
+                    'whatsapp_number_id' => $whatsappNumber->id,
+                ]);
+
                 foreach ($value['messages'] ?? [] as $message) {
 
                     $contact = $this->findContact(
@@ -148,6 +176,12 @@ class MetaWhatsappWebhookService
                 /*
                  * Delivery/read/failure updates.
                  */
+                $statusCount = count($value['statuses'] ?? []);
+                \\Log::info('Processing status updates from webhook', [
+                    'count' => $statusCount,
+                    'whatsapp_number_id' => $whatsappNumber->id,
+                ]);
+
                 foreach ($value['statuses'] ?? [] as $status) {
 
                     $this->processStatus(
@@ -240,6 +274,9 @@ class MetaWhatsappWebhookService
             $message['id'] ?? null;
 
         if (!$whatsappMessageId) {
+            \\Log::warning('Inbound message missing ID', [
+                'message' => $message,
+            ]);
             return;
         }
 
@@ -254,6 +291,9 @@ class MetaWhatsappWebhookService
             ->exists();
 
         if ($alreadyExists) {
+            \\Log::debug('Duplicate inbound message ignored', [
+                'whatsapp_message_id' => $whatsappMessageId,
+            ]);
             return;
         }
 
@@ -262,6 +302,9 @@ class MetaWhatsappWebhookService
             ?? null;
 
         if (!$phone) {
+            \\Log::warning('Inbound message missing phone number', [
+                'whatsapp_message_id' => $whatsappMessageId,
+            ]);
             return;
         }
 
@@ -272,8 +315,19 @@ class MetaWhatsappWebhookService
         );
 
         if (!$customer) {
+            \\Log::warning('Could not resolve customer for inbound message', [
+                'phone' => $phone,
+                'whatsapp_message_id' => $whatsappMessageId,
+                'whatsapp_number_id' => $whatsappNumber->id,
+            ]);
             return;
         }
+
+        \\Log::info('Processing inbound message', [
+            'whatsapp_message_id' => $whatsappMessageId,
+            'customer_id' => $customer->id,
+            'phone' => $phone,
+        ]);
 
         $specialTeam = Team::query()
             ->where('slug', 'arihant-special-session')
@@ -367,6 +421,13 @@ class MetaWhatsappWebhookService
             'body' => $body,
             'metadata' => $message,
             'status' => 'delivered',
+        ]);
+
+        \\Log::info('Inbound message created', [
+            'message_id' => $dbMessage->id,
+            'whatsapp_message_id' => $whatsappMessageId,
+            'type' => $type,
+            'customer_id' => $customer->id,
         ]);
 
         /*
@@ -1066,6 +1127,9 @@ class MetaWhatsappWebhookService
             $status['id'] ?? null;
 
         if (!$whatsappMessageId) {
+            \Log::warning('Status update missing message ID', [
+                'status' => $status,
+            ]);
             return;
         }
 
@@ -1081,6 +1145,12 @@ class MetaWhatsappWebhookService
             ->first();
 
         if (!$message) {
+            \Log::warning('Message not found for status update', [
+                'whatsapp_message_id' => $whatsappMessageId,
+                'whatsapp_number_id' => $whatsappNumber->id,
+                'status' => $status['status'] ?? null,
+                'timestamp' => $status['timestamp'] ?? null,
+            ]);
             return;
         }
 
@@ -1138,6 +1208,13 @@ class MetaWhatsappWebhookService
         if (!empty($updates)) {
             $message->update($updates);
             $message->refresh();
+
+            \Log::info('Message status updated', [
+                'message_id' => $message->id,
+                'whatsapp_message_id' => $message->whatsapp_message_id,
+                'old_status' => $status['status'] ?? null,
+                'new_status' => $updates['status'] ?? null,
+            ]);
 
             broadcast(new MessageStatusUpdated($message));
         }
