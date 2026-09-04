@@ -1387,6 +1387,19 @@ class MetaWhatsappWebhookService
                     });
                 }
             )
+            ->when(
+                $specialTeam,
+                function ($query) use ($whatsappNumber) {
+                    // Arihant Special Session number
+                    // Executive must belong to a team
+                    // where this WhatsApp number is linked.
+                    $query->whereHas('team', function ($teamQuery) use ($whatsappNumber) {
+                        $teamQuery
+                            ->where('is_active', true)
+                            ->whereNotNull('whatsapp_number_id');
+                    });
+                }
+            )
             ->orderBy('id')
             ->get(['id', 'team_id']);
 
