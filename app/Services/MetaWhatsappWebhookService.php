@@ -64,8 +64,7 @@ class MetaWhatsappWebhookService
     |--------------------------------------------------------------------------
     */
 
-    public function handle(string $payload, 
-        // $signature
+    public function handle(string $payload
     ): void {
         Log::debug('Meta Webhook Processing', [
             'payload_length' => strlen($payload),
@@ -135,17 +134,7 @@ class MetaWhatsappWebhookService
                         'is_active' => $setting?->is_active,
                     ]);
                     continue;
-                }
-
-                /*
-                 * Signature verification can be enabled here.
-                 */
-                $appSecret = $setting->app_secret;
-                // $this->verifySignature(
-                //     $payload,
-                //     $signature,
-                //     $appSecret
-                // );
+                }                
 
                 $setting->update([
                     'last_webhook_at' => now(),

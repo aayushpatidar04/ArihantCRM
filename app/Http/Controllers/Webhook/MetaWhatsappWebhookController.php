@@ -53,23 +53,16 @@ class MetaWhatsappWebhookController extends Controller
      */
     public function handle(Request $request): Response
     {
-        // $signature = $request->header(
-        //     'X-Hub-Signature-256'
-        // );
-
-        // if (!$signature) {
-        //     return response('Missing signature', 401);
-        // }
         $payload = $request->getContent();
         \Log::info('Meta Webhook Received', [
             'size' => strlen($payload),
             'content_type' => $request->header('Content-Type'),
+            'payload' => $payload
         ]);
 
         try {
             $this->webhookService->handle(
                 $payload,
-                // $signature
             );
 
             /*
