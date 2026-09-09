@@ -330,11 +330,13 @@ class MessageController extends Controller
             ->where('type', '!=', 'reaction')
             ->count();
 
-        $hasMoreMessages =
-            $totalMessages > $messages->count();
+        $hasMoreMessages = $totalMessages > $messages->count();
 
-        $nextCursor =
-            $messages->first()?->id;
+        $first = $messages->first();
+        
+        $nextCursor = is_array($first)
+            ? ($first['id'] ?? null)
+            : ($first->id ?? null);
 
         /*
         |--------------------------------------------------------------------------

@@ -377,7 +377,11 @@ class MessageController extends Controller
 
         $hasMoreMessages = $totalMessages > $messages->count();
 
-        $nextCursor = $messages->first()?->id;
+        $first = $messages->first();
+
+        $nextCursor = is_array($first)
+            ? ($first['id'] ?? null)
+            : ($first->id ?? null);
 
         $sidebarSearch = trim(
             (string) $request->input('search', '')
