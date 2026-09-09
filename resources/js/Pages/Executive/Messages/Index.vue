@@ -283,10 +283,41 @@ const formatTime = (value) => {
                                     : 'text-surface-500'
                             "
                         >
-                            {{
-                                customer.messages?.[0]?.body ||
-                                "No messages yet"
-                            }}
+                            <span v-if="customer.messages?.[0]">
+                                <span
+                                    v-if="customer.messages[0].type === 'image'"
+                                    >📷 Photo</span
+                                >
+                                <span
+                                    v-else-if="
+                                        customer.messages[0].type === 'video'
+                                    "
+                                    >🎥 Video</span
+                                >
+                                <span
+                                    v-else-if="
+                                        customer.messages[0].type === 'audio'
+                                    "
+                                    >🎵 Audio</span
+                                >
+                                <span
+                                    v-else-if="
+                                        customer.messages[0].type === 'document'
+                                    "
+                                    >📄 Document</span
+                                >
+                                <span
+                                    v-else-if="
+                                        customer.messages[0].type === 'sticker'
+                                    "
+                                    >🌟 Sticker</span
+                                >
+                                <span v-else>{{
+                                    customer.messages[0].body ||
+                                    "No message body"
+                                }}</span>
+                            </span>
+                            <span v-else>No messages yet</span>
                         </p>
                     </div>
 

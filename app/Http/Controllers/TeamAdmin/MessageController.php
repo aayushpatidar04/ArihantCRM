@@ -165,16 +165,21 @@ class MessageController extends Controller
             */
 
             ->with([
-                'messages' => function ($query) use ($whatsappNumber) {
+                'messages' => function ($query) use ($team) {
                     $query
                         ->where('type', '!=', 'reaction')
-                        ->when(
-                            $whatsappNumber,
-                            fn($q) => $q->where(
-                                'whatsapp_number_id',
-                                $whatsappNumber->id
-                            )
-                        )
+                        ->whereIn('whatsapp_number_id', function ($sub) use ($team) {
+                            $specialNumberId = app(\App\Services\SpecialSessionService::class)
+                                ->specialTeam()?->whatsapp_number_id;
+
+                            $sub->select('id')
+                                ->from('whatsapp_numbers')
+                                ->where('team_id', $team->id);
+
+                            if ($specialNumberId) {
+                                $sub->orWhere('id', $specialNumberId);
+                            }
+                        })
                         ->latest()
                         ->limit(1);
                 },
@@ -185,9 +190,8 @@ class MessageController extends Controller
             | Sort by Latest Message
             |--------------------------------------------------------------------------
             */
-
             ->orderByDesc(
-                Message::select('created_at')
+                Message::selectRaw('MAX(created_at)')
                     ->whereColumn(
                         'messages.customer_id',
                         'customers.id'
@@ -199,8 +203,6 @@ class MessageController extends Controller
                             $whatsappNumber->id
                         )
                     )
-                    ->latest()
-                    ->limit(1)
             )
 
             ->paginate(30)
@@ -317,14 +319,13 @@ class MessageController extends Controller
         /*
          * Templates belonging to the team's WhatsApp number.
          */
+        $replyNumber = app(\App\Services\SpecialSessionService::class)
+            ->replyNumber($customer, $team);
+
         $templates = collect();
 
-        $whatsappNumber = $conversationNumberId
-            ? WhatsappNumber::query()->whereKey($conversationNumberId)->first() ?? $team->whatsappNumber
-            : $team->whatsappNumber;
-
-        if ($whatsappNumber) {
-            $templates = $whatsappNumber
+        if ($replyNumber) {
+            $templates = $replyNumber
                 ->whatsappTemplates()
                 ->where('status', 'APPROVED')
                 ->orderBy('name')
@@ -382,18 +383,9 @@ class MessageController extends Controller
                         ->limit(1);
                 },
             ])
-            ->orderByDesc(
-                Message::select('created_at')
-                    ->whereColumn(
-                        'messages.customer_id',
-                        'customers.id'
-                    )
-                    ->whereIn(
-                        'messages.whatsapp_number_id',
-                        $visibleNumberIds
-                    )
-                    ->latest()
-                    ->limit(1)
+            ->orderByRaw(
+                '(SELECT MAX(messages.created_at) FROM messages WHERE messages.customer_id = customers.id AND messages.whatsapp_number_id IN (' . implode(',', array_map('intval', $visibleNumberIds)) . ') AND messages.type != ? ) DESC NULLS LAST',
+                ['reaction']
             )
             ->paginate(30)
             ->withQueryString();
