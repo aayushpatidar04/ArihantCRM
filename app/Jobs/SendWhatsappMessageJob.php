@@ -66,7 +66,13 @@ class SendWhatsappMessageJob implements ShouldQueue
         $message->refresh();
 
         event(new \App\Events\MessageStatusUpdated($message));
-
+        Log::info('Sending WhatsApp message', [
+            'message_id' => $message->id,
+            'whatsapp_number_id' => $message->whatsappNumber?->id,
+            'phone_number_id' => $message->whatsappNumber?->phone_number_id,
+            'to' => $message->customer->phone,
+            'body_length' => strlen($message->body),
+        ]);
         try {
 
             $response = $whatsapp->sendText(
@@ -79,6 +85,12 @@ class SendWhatsappMessageJob implements ShouldQueue
                 $response,
                 'messages.0.id'
             );
+
+            Log::info('Meta WhatsApp send response', [
+                'message_id' => $message->id,
+                'response' => $response,
+                'whatsapp_message_id' => $whatsappMessageId,
+            ]);
 
             $message->update([
                 'whatsapp_message_id' => $whatsappMessageId,
