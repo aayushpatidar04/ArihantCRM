@@ -35,13 +35,13 @@ class SpecialSessionService
 
         $specialInboundIsOpen = false;
 
-        if ($lastInbound) {
-            // Check if it's from the special number
-            if ($lastInbound->whatsapp_number_id === $specialNumber->id) {
-                // Check if it's within the last 24 hours
-                $specialInboundIsOpen = $lastInbound->created_at >= now()->subHours(24);
-            }
-        }
+        // if ($lastInbound) {
+        //     // Check if it's from the special number
+        //     if ($lastInbound->whatsapp_number_id === $specialNumber->id) {
+        //         // Check if it's within the last 24 hours
+        //         $specialInboundIsOpen = $lastInbound->created_at >= now()->subHours(24);
+        //     }
+        // }
 
 
         return $specialInboundIsOpen
