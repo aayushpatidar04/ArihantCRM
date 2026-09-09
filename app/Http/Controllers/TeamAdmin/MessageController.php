@@ -262,20 +262,58 @@ class MessageController extends Controller
         $senderContextService = app(MessageSenderContextService::class);
 
         $messages = $messages->map(function (Message $message) use ($customer, $senderContextService) {
-            if ($message->direction === 'outbound') {
-                $message->sender_context = $senderContextService->getContext(
-                    $customer,
-                    $message->sent_by
-                );
-            } else {
-                $message->sender_context = [
+            $senderContext = $message->direction === 'outbound'
+                ? $senderContextService->getContext($customer, $message->sent_by)
+                : [
                     'type' => null,
                     'name' => null,
                     'role' => null,
                 ];
-            }
 
-            return $message;
+            return [
+                'id' => $message->id,
+                'customer_id' => $message->customer_id,
+                'team_id' => $message->team_id,
+                'whatsapp_number_id' => $message->whatsapp_number_id,
+                'direction' => $message->direction,
+                'type' => $message->type,
+                'body' => $message->body,
+                'status' => $message->status,
+                'failure_reason' => $message->failure_reason,
+                'is_forwarded' => (bool) $message->is_forwarded,
+                'delivered_at' => $message->delivered_at?->toISOString(),
+                'read_at' => $message->read_at?->toISOString(),
+                'media_id' => $message->media_id,
+                'media_mime_type' => $message->media_mime_type,
+                'media_filename' => $message->media_filename,
+                'media_caption' => $message->media_caption,
+                'reaction_to_message_id' => $message->reaction_to_message_id,
+                'created_at' => $message->created_at?->toISOString(),
+                'sent_by' => $message->sentBy
+                    ? [
+                        'id' => $message->sentBy->id,
+                        'name' => $message->sentBy->name,
+                    ]
+                    : null,
+                'sender_context' => $senderContext,
+                'reactions' => $message->reactions?->map(fn($r) => [
+                    'id' => $r->id,
+                    'body' => $r->body,
+                    'customer_id' => $r->customer_id,
+                    'created_at' => $r->created_at?->toISOString(),
+                ])->values() ?? [],
+                'document' => $message->document
+                    ? [
+                        'id' => $message->document->id,
+                        'original_filename' => $message->document->original_filename,
+                        'stored_filename' => $message->document->stored_filename,
+                        'mime_type' => $message->document->mime_type,
+                        'size' => $message->document->size,
+                        'formatted_size' => $message->document->formatted_size,
+                        'url' => $message->document->url,
+                    ]
+                    : null,
+            ];
         })->values();
 
         /*
@@ -311,7 +349,7 @@ class MessageController extends Controller
             ->replyNumber($customer, $team);
 
         $templates = collect();
-        
+
         if ($replyNumber) {
             $templates = $replyNumber
                 ->whatsappTemplates()
