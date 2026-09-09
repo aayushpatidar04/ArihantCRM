@@ -374,6 +374,30 @@ class DashboardController extends Controller
             )
             ->groupBy('messages.customer_id');
 
+        $authorizedUserIds = \App\Models\User::query()
+            ->where('team_id', $teamId)
+            ->pluck('id')
+            ->all();
+
+        $customerScopeForActivity = function ($query) use ($teamId, $authorizedUserIds) {
+            /*
+             * Customers belonging to this team, OR
+             * customers on the special-session number whose assigned_to /
+             * old_owner_id user belongs to this team.
+             */
+            $query->where(function ($q) use ($teamId) {
+                $q->where('team_id', $teamId);
+            });
+
+            if (!empty($authorizedUserIds)) {
+                $query->orWhere(function ($q) use ($authorizedUserIds) {
+                    $q
+                        ->whereIn('assigned_to', $authorizedUserIds)
+                        ->orWhereIn('old_owner_id', $authorizedUserIds);
+                });
+            }
+        };
+
         $recentMessages = Message::query()
             ->with([
                 'customer' => function ($query) {
@@ -410,6 +434,7 @@ class DashboardController extends Controller
                         );
                 });
             })
+            ->whereHas('customer', $customerScopeForActivity)
             ->whereIn(
                 'messages.id',
                 $latestMessageIds
