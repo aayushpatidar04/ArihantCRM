@@ -203,6 +203,8 @@ class BitrixSyncCommand extends Command
                  */
                 $this->syncTeamAdmins();
 
+                $this->syncExecutives();
+
                 /*
                  * Remove stale team memberships.
                  */
@@ -406,7 +408,7 @@ class BitrixSyncCommand extends Command
         return trim(
             (string) (
                 $department['name']
-                ?? $department['Name'] 
+                ?? $department['Name']
                 ?? 'Department'
             )
         );
@@ -974,7 +976,7 @@ class BitrixSyncCommand extends Command
                 ->when(
                     $ignoreId,
                     fn($query) =>
-                    $query->where('id', '!=', $ignoreId)
+                        $query->where('id', '!=', $ignoreId)
                 )
                 ->exists()
         ) {
@@ -1166,6 +1168,41 @@ class BitrixSyncCommand extends Command
                 $user->assignRole($role);
             }
         }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | EXECUTIVES
+    |--------------------------------------------------------------------------
+    */
+
+    protected function syncExecutives(): void
+    {
+        $this->info('Synchronizing executive roles...');
+
+        $role = Role::firstOrCreate([
+            'name' => 'executive',
+            'guard_name' => 'web',
+        ]);
+
+        $assigned = 0;
+
+        foreach ($this->userMap as $bitrixUserId => $userId) {
+            $user = User::find($userId);
+
+            if (!$user || !$user->is_active || !$user->team_id) {
+                continue;
+            }
+
+            if ($user->hasRole('executive')) {
+                continue;
+            }
+
+            $user->assignRole($role);
+            $assigned++;
+        }
+
+        $this->info("Executive role assigned to {$assigned} user(s).");
     }
 
     /*
