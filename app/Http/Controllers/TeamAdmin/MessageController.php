@@ -95,31 +95,31 @@ class MessageController extends Controller
 
                 if ($isTeamAdmin) {
                     /*
-                    * Team Admin can access every customer of this team,
-                    * including unassigned customers.
-                    */
+                     * Team Admin can access every customer of this team,
+                     * including unassigned customers.
+                     */
                     $query->where('team_id', $team->id);
 
                     return;
                 }
 
                 /*
-                * Executive access:
-                *
-                * Current owner
-                */
+                 * Executive access:
+                 *
+                 * Current owner
+                 */
                 $query->whereHas('assignedTo', function ($q) use ($team, $user) {
                     $q->where('users.team_id', $team->id)
                         ->where('users.id', $user->id);
                 })
 
-                /*
-                * Previous owner
-                */
-                ->orWhereHas('oldOwner', function ($q) use ($team, $user) {
-                    $q->where('users.team_id', $team->id)
-                        ->where('users.id', $user->id);
-                });
+                    /*
+                     * Previous owner
+                     */
+                    ->orWhereHas('oldOwner', function ($q) use ($team, $user) {
+                        $q->where('users.team_id', $team->id)
+                            ->where('users.id', $user->id);
+                    });
             })
 
             /*
@@ -150,7 +150,7 @@ class MessageController extends Controller
                         ->whereNull('read_at')
                         ->when(
                             $whatsappNumber,
-                            fn ($q) => $q->where(
+                            fn($q) => $q->where(
                                 'whatsapp_number_id',
                                 $whatsappNumber->id
                             )
@@ -170,7 +170,7 @@ class MessageController extends Controller
                         ->where('type', '!=', 'reaction')
                         ->when(
                             $whatsappNumber,
-                            fn ($q) => $q->where(
+                            fn($q) => $q->where(
                                 'whatsapp_number_id',
                                 $whatsappNumber->id
                             )
@@ -194,7 +194,7 @@ class MessageController extends Controller
                     )
                     ->when(
                         $whatsappNumber,
-                        fn ($q) => $q->where(
+                        fn($q) => $q->where(
                             'messages.whatsapp_number_id',
                             $whatsappNumber->id
                         )
@@ -292,20 +292,28 @@ class MessageController extends Controller
          * IMPORTANT:
          * 24-hour window is based ONLY on the latest inbound message.
          */
-        $lastInboundMessage = $customer->messages()
-            ->where('whatsapp_number_id', $conversationNumberId)
-            ->where('direction', 'inbound')
-            ->latest('created_at')
-            ->first();
+        // $lastInboundMessage = $customer->messages()
+        //     ->where('whatsapp_number_id', $conversationNumberId)
+        //     ->where('direction', 'inbound')
+        //     ->latest('created_at')
+        //     ->first();
 
-        $windowExpiresAt = $lastInboundMessage
-            ? $lastInboundMessage->created_at->copy()->addHours(24)
+        // $windowExpiresAt = $lastInboundMessage
+        //     ? $lastInboundMessage->created_at->copy()->addHours(24)
+        //     : null;
+
+        // $windowOpen = $windowExpiresAt
+        //     ? now()->lt($windowExpiresAt)
+        //     : false;
+
+        $conversation = app(\App\Services\SpecialSessionService::class)
+            ->windowInfo($customer, $team);
+
+        $windowOpen = $conversation['window_open'];
+
+        $windowExpiresAt = $conversation['window_expires_at']
+            ? \Carbon\Carbon::parse($conversation['window_expires_at'])
             : null;
-
-        $windowOpen = $windowExpiresAt
-            ? now()->lt($windowExpiresAt)
-            : false;
-
         /*
          * Templates belonging to the team's WhatsApp number.
          */
@@ -409,7 +417,7 @@ class MessageController extends Controller
                 'window_expires_at' => $windowExpiresAt?->toIso8601String(),
 
                 'last_inbound_at' =>
-                    $lastInboundMessage?->created_at?->toIso8601String(),
+                    $conversation['last_inbound_at'],
             ],
 
             'customers' => $sidebarCustomers,
@@ -1493,7 +1501,8 @@ class MessageController extends Controller
         return back();
     }
 
-    protected function authorizeCustomer(Customer $customer, int $teamId): void{
+    protected function authorizeCustomer(Customer $customer, int $teamId): void
+    {
         $user = request()->user();
 
         /*
@@ -1792,8 +1801,8 @@ class MessageController extends Controller
 
             'has_more' =>
                 $customer->messages()
-                        ->whereIn('whatsapp_number_id', $visibleNumberIds)
-                        ->where('type', '!=', 'reaction')
+                    ->whereIn('whatsapp_number_id', $visibleNumberIds)
+                    ->where('type', '!=', 'reaction')
                     ->where(
                         'id',
                         '<',

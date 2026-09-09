@@ -57,4 +57,46 @@ class SpecialSessionService
             ? $specialTeam
             : $normalTeam;
     }
+
+    /**
+     * Return the 24-hour window expiry and open status
+     * for the number that replyNumber() would route to.
+     *
+     * The window is based on the latest inbound message on
+     * the reply number — whether that's the team's normal
+     * number or the special-session number. So if the customer's
+     * last inbound came from the special-session number and
+     * is within 24 hours, the window is treated as open here
+     * and a normal text can be sent from that special number.
+     */
+    public function windowInfo(Customer $customer, Team $normalTeam): array
+    {
+        $replyNumber = $this->replyNumber($customer, $normalTeam);
+
+        if (!$replyNumber) {
+            return [
+                'window_open' => false,
+                'window_expires_at' => null,
+                'last_inbound_at' => null,
+            ];
+        }
+
+        $lastInbound = $customer->messages()
+            ->where('direction', 'inbound')
+            ->where('whatsapp_number_id', $replyNumber->id)
+            ->latest('created_at')
+            ->first();
+
+        $windowExpiresAt = $lastInbound
+            ? $lastInbound->created_at->copy()->addHours(24)
+            : null;
+
+        return [
+            'window_open' => $windowExpiresAt
+                ? now()->lt($windowExpiresAt)
+                : false,
+            'window_expires_at' => $windowExpiresAt?->toIso8601String(),
+            'last_inbound_at' => $lastInbound?->created_at?->toIso8601String(),
+        ];
+    }
 }

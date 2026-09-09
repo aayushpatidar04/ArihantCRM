@@ -302,31 +302,14 @@ class MessageController extends Controller
         | 24-hour WhatsApp window
         |--------------------------------------------------------------------------
         */
-        $number = $team->whatsappNumber;
-        $conversationNumberId = $request->integer(
-            'whatsapp_number_id',
-            $team->whatsapp_number_id
-        );
+        $conversation = app(\App\Services\SpecialSessionService::class)
+            ->windowInfo($customer, $team);
 
-        $lastInboundMessage = $customer->messages()
-            ->where('direction', 'inbound')
-            ->where(
-                function ($query) use ($visibleNumberIds) {
-                    $query->whereIn('whatsapp_number_id', $visibleNumberIds);
-                }
-            )
-            ->latest('created_at')
-            ->first();
+        $windowOpen = $conversation['window_open'];
 
-        $windowExpiresAt = $lastInboundMessage
-            ? $lastInboundMessage->created_at
-                ->copy()
-                ->addHours(24)
+        $windowExpiresAt = $conversation['window_expires_at']
+            ? \Carbon\Carbon::parse($conversation['window_expires_at'])
             : null;
-
-        $windowOpen = $windowExpiresAt
-            ? now()->lt($windowExpiresAt)
-            : false;
 
         /*
         |--------------------------------------------------------------------------
@@ -464,9 +447,7 @@ class MessageController extends Controller
                         $windowExpiresAt?->toIso8601String(),
 
                     'last_inbound_at' =>
-                        $lastInboundMessage
-                            ?->created_at
-                                ?->toIso8601String(),
+                        $conversation['last_inbound_at'],
                 ],
 
                 'customers' => $sidebarCustomers,
