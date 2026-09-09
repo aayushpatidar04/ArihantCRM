@@ -306,6 +306,7 @@ class MessageController extends Controller
             $templates = $replyNumber
                 ->whatsappTemplates()
                 ->where('status', 'APPROVED')
+                ->where('is_enabled', true)
                 ->orderBy('name')
                 ->get([
                     'id',
@@ -1063,6 +1064,7 @@ class MessageController extends Controller
             ->whatsappTemplates()
             ->whereKey($validated['template_id'])
             ->where('status', 'APPROVED')
+            ->where('is_enabled', true)
             ->first();
 
         abort_unless(

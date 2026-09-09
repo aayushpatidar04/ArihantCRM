@@ -31,7 +31,8 @@ class MetaWhatsappService
     /**
      * Test a WhatsApp number against Meta Cloud API.
      */
-    public function testConnection(WhatsappNumber $whatsappNumber): array {
+    public function testConnection(WhatsappNumber $whatsappNumber): array
+    {
         $this->validateWhatsappNumber($whatsappNumber);
 
         $response = Http::withToken(
@@ -72,7 +73,8 @@ class MetaWhatsappService
      * Fetch and synchronize WhatsApp templates belonging
      * to this WhatsApp Business Account.
      */
-    public function syncTemplates(WhatsappNumber $whatsappNumber): int {
+    public function syncTemplates(WhatsappNumber $whatsappNumber): int
+    {
         $whatsappNumber->loadMissing(
             'metaWhatsappSetting'
         );
@@ -153,6 +155,29 @@ class MetaWhatsappService
             $count++;
         }
 
+        $whatsappNumber
+            ->whatsappTemplates()
+            ->whereIn('id', collect($templates)->map(
+                fn($t) =>
+                    $whatsappNumber->whatsappTemplates()
+                        ->where('name', $t['name'] ?? '')
+                        ->where('language', $t['language'] ?? 'en_US')
+                        ->value('id')
+            )->filter()->all())
+            ->update(['is_enabled' => true]);
+
+        /*
+         * Disable templates we did NOT sync this round.
+         */
+        $whatsappNumber
+            ->whatsappTemplates()
+            ->whereNotIn('name', collect($templates)->pluck('name')->filter()->all())
+            ->update([
+                'is_enabled' => false,
+                'status' => null,
+                'last_synced_at' => now(),
+            ]);
+
         return $count;
     }
 
@@ -162,16 +187,17 @@ class MetaWhatsappService
      * This is kept compatible with the existing implementation
      * which is already tested and working.
      */
-    public function sendTemplate(WhatsappNumber $whatsappNumber, string $to, WhatsappTemplate $template, array $components = []): array {
+    public function sendTemplate(WhatsappNumber $whatsappNumber, string $to, WhatsappTemplate $template, array $components = []): array
+    {
         $this->validateWhatsappNumber(
             $whatsappNumber
         );
 
         /*
-        * Security:
-        *
-        * Template and WhatsApp number must match.
-        */
+         * Security:
+         *
+         * Template and WhatsApp number must match.
+         */
         if (
             (int) $template->whatsapp_number_id !==
             (int) $whatsappNumber->id
@@ -182,8 +208,8 @@ class MetaWhatsappService
         }
 
         /*
-        * Only approved templates are allowed.
-        */
+         * Only approved templates are allowed.
+         */
         if (
             strtoupper((string) $template->status) !==
             'APPROVED'
@@ -215,9 +241,9 @@ class MetaWhatsappService
         ];
 
         /*
-        * Components have already been prepared
-        * by the template preview.
-        */
+         * Components have already been prepared
+         * by the template preview.
+         */
         if (!empty($components)) {
             $payload['template']['components'] =
                 array_values($components);
@@ -241,7 +267,8 @@ class MetaWhatsappService
      * This is intended for replies after the WhatsApp
      * conversation is inside the allowed messaging window.
      */
-    public function sendText(WhatsappNumber $whatsappNumber, string $to, string $body, bool $previewUrl = false): array {
+    public function sendText(WhatsappNumber $whatsappNumber, string $to, string $body, bool $previewUrl = false): array
+    {
         $this->validateWhatsappNumber($whatsappNumber);
 
         $to = $this->normalizePhoneNumber($to);
@@ -280,7 +307,8 @@ class MetaWhatsappService
      * Send an image message using an already uploaded
      * Meta media ID.
      */
-    public function sendImage(WhatsappNumber $whatsappNumber, string $to, string $mediaId, ?string $caption = null): array {
+    public function sendImage(WhatsappNumber $whatsappNumber, string $to, string $mediaId, ?string $caption = null): array
+    {
         $this->validateWhatsappNumber($whatsappNumber);
 
         $to = $this->normalizePhoneNumber($to);
@@ -308,7 +336,8 @@ class MetaWhatsappService
      * Send a document using an already uploaded
      * Meta media ID.
      */
-    public function sendDocument(WhatsappNumber $whatsappNumber, string $to, string $mediaId, ?string $filename = null, ?string $caption = null): array {
+    public function sendDocument(WhatsappNumber $whatsappNumber, string $to, string $mediaId, ?string $filename = null, ?string $caption = null): array
+    {
         $this->validateWhatsappNumber($whatsappNumber);
 
         $to = $this->normalizePhoneNumber($to);
@@ -345,7 +374,8 @@ class MetaWhatsappService
     /**
      * Send audio using an already uploaded Meta media ID.
      */
-    public function sendAudio(WhatsappNumber $whatsappNumber, string $to, string $mediaId): array {
+    public function sendAudio(WhatsappNumber $whatsappNumber, string $to, string $mediaId): array
+    {
         $this->validateWhatsappNumber($whatsappNumber);
 
         $to = $this->normalizePhoneNumber($to);
@@ -366,7 +396,8 @@ class MetaWhatsappService
     /**
      * Send video using an already uploaded Meta media ID.
      */
-    public function sendVideo(WhatsappNumber $whatsappNumber, string $to, string $mediaId, ?string $caption = null): array {
+    public function sendVideo(WhatsappNumber $whatsappNumber, string $to, string $mediaId, ?string $caption = null): array
+    {
         $this->validateWhatsappNumber($whatsappNumber);
 
         $to = $this->normalizePhoneNumber($to);
@@ -393,7 +424,8 @@ class MetaWhatsappService
         );
     }
 
-    public function uploadMedia(WhatsappNumber $whatsappNumber, string $filePath, string $mimeType): string {
+    public function uploadMedia(WhatsappNumber $whatsappNumber, string $filePath, string $mimeType): string
+    {
         $this->validateWhatsappNumber($whatsappNumber);
 
         if (!is_file($filePath)) {
@@ -441,7 +473,8 @@ class MetaWhatsappService
     /**
      * Send sticker using an already uploaded Meta media ID.
      */
-    public function sendSticker(WhatsappNumber $whatsappNumber, string $to, string $mediaId): array {
+    public function sendSticker(WhatsappNumber $whatsappNumber, string $to, string $mediaId): array
+    {
         $this->validateWhatsappNumber($whatsappNumber);
 
         $to = $this->normalizePhoneNumber($to);
@@ -468,7 +501,8 @@ class MetaWhatsappService
     /**
      * Send a WhatsApp location.
      */
-    public function sendLocation(WhatsappNumber $whatsappNumber, string $to, float $latitude, float $longitude, ?string $name = null, ?string $address = null): array {
+    public function sendLocation(WhatsappNumber $whatsappNumber, string $to, float $latitude, float $longitude, ?string $name = null, ?string $address = null): array
+    {
         $this->validateWhatsappNumber($whatsappNumber);
 
         $to = $this->normalizePhoneNumber($to);
@@ -514,7 +548,8 @@ class MetaWhatsappService
      *
      * $contacts must contain the structure expected by Meta.
      */
-    public function sendContacts(WhatsappNumber $whatsappNumber, string $to, array $contacts): array {
+    public function sendContacts(WhatsappNumber $whatsappNumber, string $to, array $contacts): array
+    {
         $this->validateWhatsappNumber($whatsappNumber);
 
         $to = $this->normalizePhoneNumber($to);
@@ -548,7 +583,8 @@ class MetaWhatsappService
      * The response from Meta is returned untouched so the caller
      * can create the local Message using the returned message ID.
      */
-    protected function sendMessageRequest(WhatsappNumber $whatsappNumber, array $payload): array {
+    protected function sendMessageRequest(WhatsappNumber $whatsappNumber, array $payload): array
+    {
         $this->validateWhatsappNumber($whatsappNumber);
 
         $response = Http::withToken(
@@ -570,7 +606,7 @@ class MetaWhatsappService
             'response_status' => $response->status(),
             'response_body' => $response->json(),
         ]);
-        
+
         $this->throwMetaException(
             $response,
             'Meta WhatsApp API request failed.'
@@ -579,8 +615,9 @@ class MetaWhatsappService
         return $response->json();
     }
 
-    public function sendMessage(WhatsappNumber $whatsappNumber, string $to, string $type, mixed $content): array {
-        if (! $whatsappNumber->is_active) {
+    public function sendMessage(WhatsappNumber $whatsappNumber, string $to, string $type, mixed $content): array
+    {
+        if (!$whatsappNumber->is_active) {
             throw new RuntimeException(
                 'This WhatsApp number is inactive.'
             );
@@ -600,7 +637,7 @@ class MetaWhatsappService
 
         $to = preg_replace('/[^0-9]/', '', $to);
 
-        if (! $to) {
+        if (!$to) {
             throw new RuntimeException(
                 'Invalid recipient WhatsApp number.'
             );
@@ -617,7 +654,7 @@ class MetaWhatsappService
             'contact',
         ];
 
-        if (! in_array($type, $allowedTypes, true)) {
+        if (!in_array($type, $allowedTypes, true)) {
             throw new RuntimeException(
                 'Unsupported WhatsApp message type.'
             );
@@ -685,10 +722,10 @@ class MetaWhatsappService
                 $payload
             );
 
-        if (! $response->successful()) {
+        if (!$response->successful()) {
             throw new RuntimeException(
                 $response->json('error.message')
-                    ?? 'Meta WhatsApp API request failed.'
+                ?? 'Meta WhatsApp API request failed.'
             );
         }
 
@@ -704,7 +741,8 @@ class MetaWhatsappService
     /**
      * Validate the WhatsApp number before making an API request.
      */
-    protected function validateWhatsappNumber(WhatsappNumber $whatsappNumber): void {
+    protected function validateWhatsappNumber(WhatsappNumber $whatsappNumber): void
+    {
         if (!$whatsappNumber->is_active) {
             throw new RuntimeException(
                 'This WhatsApp number is inactive.'
@@ -730,7 +768,8 @@ class MetaWhatsappService
      * Meta expects an international number without
      * +, spaces, brackets or dashes.
      */
-    protected function normalizePhoneNumber(string $phone): string {
+    protected function normalizePhoneNumber(string $phone): string
+    {
         $phone = preg_replace(
             '/[^0-9]/',
             '',
@@ -749,7 +788,8 @@ class MetaWhatsappService
     /**
      * Generate Graph API URL.
      */
-    protected function graphUrl(string $path): string {
+    protected function graphUrl(string $path): string
+    {
         return sprintf(
             'https://graph.facebook.com/%s/%s',
             $this->graphVersion,
@@ -760,7 +800,8 @@ class MetaWhatsappService
     /**
      * Convert Meta API failures into application exceptions.
      */
-    protected function throwMetaException(Response $response,string $fallbackMessage): void {
+    protected function throwMetaException(Response $response, string $fallbackMessage): void
+    {
         if ($response->successful()) {
             return;
         }
@@ -782,7 +823,8 @@ class MetaWhatsappService
         throw new RuntimeException($error);
     }
 
-    public function templatesForNumber(?WhatsappNumber $number) {
+    public function templatesForNumber(?WhatsappNumber $number)
+    {
         if (!$number) {
             return collect();
         }
@@ -795,15 +837,18 @@ class MetaWhatsappService
              */
             ->where('whatsapp_number_id', $number->id)
             ->where('status', 'APPROVED')
+            ->where('is_enabled', true)
             ->orderBy('name')
             ->get();
     }
 
-    public function findTemplateForNumber(int $templateId, WhatsappNumber $number): ?WhatsappTemplate {
+    public function findTemplateForNumber(int $templateId, WhatsappNumber $number): ?WhatsappTemplate
+    {
         return WhatsappTemplate::query()
             ->whereKey($templateId)
             ->where('waba_id', $number->waba_id)
             ->where('status', 'APPROVED')
+            ->where('is_enabled', true)
             ->first();
     }
 

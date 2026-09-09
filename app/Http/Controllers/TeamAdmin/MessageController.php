@@ -316,6 +316,7 @@ class MessageController extends Controller
             $templates = $replyNumber
                 ->whatsappTemplates()
                 ->where('status', 'APPROVED')
+                ->where('is_enabled', true)
                 ->orderBy('name')
                 ->get([
                     'id',
