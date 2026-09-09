@@ -311,7 +311,7 @@ class MessageController extends Controller
             ->replyNumber($customer, $team);
 
         $templates = collect();
-        \Log::info($replyNumber);
+        
         if ($replyNumber) {
             $templates = $replyNumber
                 ->whatsappTemplates()
