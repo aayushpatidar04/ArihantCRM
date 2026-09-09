@@ -53,7 +53,12 @@ class MessageController extends Controller
             'No workspace selected.'
         );
 
-        $whatsappNumber = $team->whatsappNumber;
+        $visibleNumberIds = $this->visibleWhatsappNumberIds(
+            $request->integer(
+                'whatsapp_number_id',
+                $team->whatsapp_number_id
+            )
+        );
 
         $search = trim(
             (string) $request->input('search', '')
@@ -144,17 +149,11 @@ class MessageController extends Controller
             */
 
             ->withCount([
-                'messages as unread_count' => function ($query) use ($whatsappNumber) {
+                'messages as unread_count' => function ($query) use ($visibleNumberIds) {
                     $query
                         ->where('direction', 'inbound')
                         ->whereNull('read_at')
-                        ->when(
-                            $whatsappNumber,
-                            fn($q) => $q->where(
-                                'whatsapp_number_id',
-                                $whatsappNumber->id
-                            )
-                        );
+                        ->whereIn('whatsapp_number_id', $visibleNumberIds);
                 },
             ])
 
@@ -190,19 +189,8 @@ class MessageController extends Controller
             | Sort by Latest Message
             |--------------------------------------------------------------------------
             */
-            ->orderByDesc(
-                Message::selectRaw('MAX(created_at)')
-                    ->whereColumn(
-                        'messages.customer_id',
-                        'customers.id'
-                    )
-                    ->when(
-                        $whatsappNumber,
-                        fn($q) => $q->where(
-                            'messages.whatsapp_number_id',
-                            $whatsappNumber->id
-                        )
-                    )
+            ->orderByRaw(
+                '(SELECT MAX(messages.created_at) FROM messages WHERE messages.customer_id = customers.id AND messages.type != \'reaction\' AND messages.whatsapp_number_id IN (' . implode(',', array_map('intval', $visibleNumberIds)) . ')) DESC'
             )
 
             ->paginate(30)
@@ -1480,10 +1468,18 @@ class MessageController extends Controller
             $team->whatsapp_number_id
         );
 
+        $specialNumberId = app(\App\Services\SpecialSessionService::class)
+            ->specialTeam()?->whatsapp_number_id;
+
+        $numberIds = array_filter([
+            $whatsappNumberId,
+            $specialNumberId,
+        ]);
+
         Message::query()
             ->where('customer_id', $customer->id)
             ->where('direction', 'inbound')
-            ->where('whatsapp_number_id', $whatsappNumberId)
+            ->whereIn('whatsapp_number_id', $numberIds)
             ->whereNull('read_at')
             ->update([
                 'read_at' => now(),

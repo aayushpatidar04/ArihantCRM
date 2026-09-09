@@ -53,7 +53,12 @@ class MessageController extends Controller
             'No team assigned.'
         );
 
-        $whatsappNumber = $team->whatsappNumber;
+        $visibleNumberIds = $this->visibleWhatsappNumberIds(
+            $request->integer(
+                'whatsapp_number_id',
+                $team->whatsapp_number_id
+            )
+        );
 
         $search = trim(
             (string) $request->input('search', '')
@@ -107,17 +112,11 @@ class MessageController extends Controller
             */
 
             ->withCount([
-                'messages as unread_count' => function ($query) use ($whatsappNumber) {
+                'messages as unread_count' => function ($query) use ($visibleNumberIds) {
                     $query
                         ->where('direction', 'inbound')
                         ->whereNull('read_at')
-                        ->when(
-                            $whatsappNumber,
-                            fn($q) => $q->where(
-                                'whatsapp_number_id',
-                                $whatsappNumber->id
-                            )
-                        );
+                        ->whereIn('whatsapp_number_id', $visibleNumberIds);
                 },
             ])
 
@@ -128,21 +127,10 @@ class MessageController extends Controller
             */
 
             ->with([
-                'messages' => function ($query) use ($team) {
+                'messages' => function ($query) use ($visibleNumberIds) {
                     $query
                         ->where('type', '!=', 'reaction')
-                        ->whereIn('whatsapp_number_id', function ($sub) use ($team) {
-                            $specialNumberId = app(\App\Services\SpecialSessionService::class)
-                                ->specialTeam()?->whatsapp_number_id;
-
-                            $sub->select('id')
-                                ->from('whatsapp_numbers')
-                                ->where('team_id', $team->id);
-
-                            if ($specialNumberId) {
-                                $sub->orWhere('id', $specialNumberId);
-                            }
-                        })
+                        ->whereIn('whatsapp_number_id', $visibleNumberIds)
                         ->latest()
                         ->limit(1);
                 },
@@ -154,19 +142,8 @@ class MessageController extends Controller
             |--------------------------------------------------------------------------
             */
 
-            ->orderByDesc(
-                Message::selectRaw('MAX(created_at)')
-                    ->whereColumn(
-                        'messages.customer_id',
-                        'customers.id'
-                    )
-                    ->when(
-                        $whatsappNumber,
-                        fn($q) => $q->where(
-                            'messages.whatsapp_number_id',
-                            $whatsappNumber->id
-                        )
-                    )
+            ->orderByRaw(
+                '(SELECT MAX(messages.created_at) FROM messages WHERE messages.customer_id = customers.id AND messages.type != \'reaction\' AND messages.whatsapp_number_id IN (' . implode(',', array_map('intval', $visibleNumberIds)) . ')) DESC'
             )
 
             ->paginate(30)

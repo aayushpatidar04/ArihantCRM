@@ -132,11 +132,11 @@ class DashboardController extends Controller
             });
 
         $teamGrowth = Team::select(
-                DB::raw(
-                    "DATE_FORMAT(created_at, '%Y-%m') as month"
-                ),
-                DB::raw('COUNT(*) as total')
-            )
+            DB::raw(
+                "DATE_FORMAT(created_at, '%Y-%m') as month"
+            ),
+            DB::raw('COUNT(*) as total')
+        )
             ->where(
                 'created_at',
                 '>=',
@@ -593,8 +593,22 @@ class DashboardController extends Controller
         |--------------------------------------------------------------------------
         */
 
+        $specialNumberId = app(\App\Services\SpecialSessionService::class)
+            ->specialTeam()?->whatsapp_number_id;
+
+        $visibleNumberIds = array_filter([
+            $currentTeam->whatsapp_number_id,
+            $specialNumberId,
+        ]);
+
         $visibleUnreadMessages = Message::query()
-            ->where('team_id', $teamId)
+            ->where(function ($query) use ($teamId, $visibleNumberIds) {
+                $query->where('team_id', $teamId);
+
+                if (!empty($visibleNumberIds)) {
+                    $query->orWhereIn('whatsapp_number_id', $visibleNumberIds);
+                }
+            })
             ->where('direction', 'inbound')
             ->whereNull('read_at');
 
