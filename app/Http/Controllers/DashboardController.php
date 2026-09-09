@@ -358,14 +358,23 @@ class DashboardController extends Controller
         |
         */
 
-        $latestMessageIds = (clone $messageQuery)
-            ->selectRaw('MAX(messages.id)')
-            ->groupBy([
-                'messages.customer_id',
-                'messages.whatsapp_number_id',
-            ]);
+        $specialNumberId = app(\App\Services\SpecialSessionService::class)
+            ->specialTeam()?->whatsapp_number_id;
 
-        $recentMessages = (clone $messageQuery)
+        $visibleNumberIds = array_filter([
+            $currentTeam->whatsapp_number_id,
+            $specialNumberId,
+        ]);
+
+        $latestMessageIds = Message::query()
+            ->selectRaw('MAX(messages.id)')
+            ->whereIn(
+                'whatsapp_number_id',
+                $visibleNumberIds
+            )
+            ->groupBy('messages.customer_id');
+
+        $recentMessages = Message::query()
             ->with([
                 'customer' => function ($query) {
                     $query->select([
