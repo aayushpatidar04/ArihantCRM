@@ -210,22 +210,46 @@ class DashboardController extends Controller
         $search = trim((string) $request->input('search', ''));
 
         /*
-        |--------------------------------------------------------------------------
-        | Base Customer Query
-        |--------------------------------------------------------------------------
-        */
+ |--------------------------------------------------------------------------
+ | Customer scope
+ |--------------------------------------------------------------------------
+ |
+ | A team admin can only see customers whose assigned executive (or
+ | old owner) belongs to a team they administer.
+ |
+ */
 
-        $customerQuery = Customer::query()
-            ->where('team_id', $teamId);
+        $authorizedUserIds = User::query()
+            ->where('team_id', $teamId)
+            ->pluck('id')
+            ->all();
+
+        $authorizedCustomerIds = Customer::query()
+            ->where(function ($query) use ($authorizedUserIds) {
+                $query
+                    ->whereIn('assigned_to', $authorizedUserIds)
+                    ->orWhereIn('old_owner_id', $authorizedUserIds);
+            })
+            ->pluck('id')
+            ->all();
 
         /*
-        |--------------------------------------------------------------------------
-        | Base Message Query
-        |--------------------------------------------------------------------------
-        */
+         |--------------------------------------------------------------------------
+         | Base Customer Query
+         |--------------------------------------------------------------------------
+         */
+
+        $customerQuery = Customer::query()
+            ->whereIn('id', $authorizedCustomerIds);
+
+        /*
+         |--------------------------------------------------------------------------
+         | Base Message Query
+         |--------------------------------------------------------------------------
+         */
 
         $messageQuery = Message::query()
-            ->where('team_id', $teamId);
+            ->whereIn('customer_id', $authorizedCustomerIds);
 
         /*
         |--------------------------------------------------------------------------
