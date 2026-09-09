@@ -210,46 +210,22 @@ class DashboardController extends Controller
         $search = trim((string) $request->input('search', ''));
 
         /*
- |--------------------------------------------------------------------------
- | Customer scope
- |--------------------------------------------------------------------------
- |
- | A team admin can only see customers whose assigned executive (or
- | old owner) belongs to a team they administer.
- |
- */
-
-        $authorizedUserIds = User::query()
-            ->where('team_id', $teamId)
-            ->pluck('id')
-            ->all();
-
-        $authorizedCustomerIds = Customer::query()
-            ->where(function ($query) use ($authorizedUserIds) {
-                $query
-                    ->whereIn('assigned_to', $authorizedUserIds)
-                    ->orWhereIn('old_owner_id', $authorizedUserIds);
-            })
-            ->pluck('id')
-            ->all();
-
-        /*
-         |--------------------------------------------------------------------------
-         | Base Customer Query
-         |--------------------------------------------------------------------------
-         */
+        |--------------------------------------------------------------------------
+        | Base Customer Query
+        |--------------------------------------------------------------------------
+        */
 
         $customerQuery = Customer::query()
-            ->whereIn('id', $authorizedCustomerIds);
+            ->where('team_id', $teamId);
 
         /*
-         |--------------------------------------------------------------------------
-         | Base Message Query
-         |--------------------------------------------------------------------------
-         */
+        |--------------------------------------------------------------------------
+        | Base Message Query
+        |--------------------------------------------------------------------------
+        */
 
         $messageQuery = Message::query()
-            ->whereIn('customer_id', $authorizedCustomerIds);
+            ->where('team_id', $teamId);
 
         /*
         |--------------------------------------------------------------------------
@@ -634,16 +610,44 @@ class DashboardController extends Controller
             $specialNumberId,
         ]);
 
-        $visibleUnreadMessages = Message::query()
-            ->where(function ($query) use ($teamId, $visibleNumberIds) {
-                $query->where('team_id', $teamId);
+        $authorizedUserIds = \App\Models\User::query()
+            ->where('team_id', $teamId)
+            ->pluck('id')
+            ->all();
 
-                if (!empty($visibleNumberIds)) {
-                    $query->orWhereIn('whatsapp_number_id', $visibleNumberIds);
-                }
+        $authorizedCustomerIdsForSpecial = \App\Models\Customer::query()
+            ->where(function ($query) use ($authorizedUserIds) {
+                $query
+                    ->whereIn('assigned_to', $authorizedUserIds)
+                    ->orWhereIn('old_owner_id', $authorizedUserIds);
             })
+            ->pluck('id')
+            ->all();
+
+        $visibleUnreadMessages = Message::query()
             ->where('direction', 'inbound')
-            ->whereNull('read_at');
+            ->whereNull('read_at')
+            ->where(function ($query) use ($teamId, $specialNumberId, $authorizedCustomerIdsForSpecial) {
+
+                /*
+                 * Customers belonging to this team, on the team's normal number.
+                 */
+                $query->where(function ($q) use ($teamId) {
+                    $q->where('team_id', $teamId)
+                        ->where('whatsapp_number_id', $teamId);
+                });
+
+                /*
+                 * OR — messages on the special-session number where the customer
+                 * is assigned to (or previously owned by) a user on this team.
+                 */
+                if ($specialNumberId) {
+                    $query->orWhere(function ($q) use ($specialNumberId, $authorizedCustomerIdsForSpecial) {
+                        $q->where('whatsapp_number_id', $specialNumberId)
+                            ->whereIn('customer_id', $authorizedCustomerIdsForSpecial);
+                    });
+                }
+            });
 
         /*
         |--------------------------------------------------------------------------
