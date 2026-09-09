@@ -384,8 +384,7 @@ class MessageController extends Controller
                 },
             ])
             ->orderByRaw(
-                '(SELECT MAX(messages.created_at) FROM messages WHERE messages.customer_id = customers.id AND messages.whatsapp_number_id IN (' . implode(',', array_map('intval', $visibleNumberIds)) . ') AND messages.type != ? ) DESC NULLS LAST',
-                ['reaction']
+                '(SELECT MAX(messages.created_at) FROM messages WHERE messages.customer_id = customers.id AND messages.type != \'reaction\' AND messages.whatsapp_number_id IN (' . implode(',', array_fill(0, count($visibleNumberIds), '?')) . ')) DESC'
             )
             ->paginate(30)
             ->withQueryString();
