@@ -169,22 +169,22 @@ class BitrixLeadService
         }
 
         /*
-        * ---------------------------------------------------------
-        * OLD OWNER
-        * ---------------------------------------------------------
-        *
-        * Bitrix returns a single observer ID.
-        *
-        * Example:
-        *
-        * "Observers": "51"
-        *
-        * This maps to:
-        *
-        * users.bitrix_user_id
-        *
-        * The mapped local user is stored as old_owner_id.
-        */
+         * ---------------------------------------------------------
+         * OLD OWNER
+         * ---------------------------------------------------------
+         *
+         * Bitrix returns a single observer ID.
+         *
+         * Example:
+         *
+         * "Observers": "51"
+         *
+         * This maps to:
+         *
+         * users.bitrix_user_id
+         *
+         * The mapped local user is stored as old_owner_id.
+         */
         $observerUser = $this->resolveObserverUser(
             $lead['Observers'] ?? null
         );

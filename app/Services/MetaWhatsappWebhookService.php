@@ -1242,10 +1242,10 @@ class MetaWhatsappWebhookService
                 'whatsapp_message_id',
                 $whatsappMessageId
             )
-            ->where(
-                'whatsapp_number_id',
-                $whatsappNumber->id
-            )
+            // ->where(
+            //     'whatsapp_number_id',
+            //     $whatsappNumber->id
+            // )
             ->first();
 
         if (!$message) {

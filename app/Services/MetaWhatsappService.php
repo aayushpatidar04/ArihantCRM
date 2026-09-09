@@ -563,6 +563,14 @@ class MetaWhatsappService
                 $payload
             );
 
+        Log::info('Meta WhatsApp API request', [
+            'phone_number_id' => $whatsappNumber->phone_number_id,
+            'to' => $payload['to'] ?? null,
+            'type' => $payload['type'] ?? null,
+            'response_status' => $response->status(),
+            'response_body' => $response->json(),
+        ]);
+        
         $this->throwMetaException(
             $response,
             'Meta WhatsApp API request failed.'
