@@ -481,6 +481,8 @@ class MessageController extends Controller
             ]);
         });
 
+        $message->load('document');
+
         event(new MessageCreated($message));
         /*
          * Send asynchronously.
@@ -717,6 +719,12 @@ class MessageController extends Controller
             'status' => 'pending',
             'is_forwarded' => false,
         ]);
+
+        $document->update([
+            'message_id' => $message->id,
+        ]);
+
+        $message->load('document');
 
         event(new MessageCreated($message));
 
