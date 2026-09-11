@@ -220,13 +220,14 @@ class MessageController extends Controller
         $user = $request->user();
 
         $team = $user->team;
+        $teamUserIds = $team->users()->pluck('id')->all();
 
         abort_unless($team, 403);
 
         abort_unless(
-            $customer->assigned_to === $user->id ||
-            $customer->old_owner_id === $user->id ||
-            $customer->team_id === $team->id,
+            $customer->team_id === $team->id ||
+            in_array($customer->assigned_to, $teamUserIds, true) ||
+            in_array($customer->old_owner_id, $teamUserIds, true),
             403
         );
 

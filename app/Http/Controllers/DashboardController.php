@@ -374,7 +374,7 @@ class DashboardController extends Controller
             )
             ->groupBy('messages.customer_id');
 
-        $authorizedUserIds = \App\Models\User::query()
+        $authorizedUserIds = User::query()
             ->where('team_id', $teamId)
             ->pluck('id')
             ->all();
