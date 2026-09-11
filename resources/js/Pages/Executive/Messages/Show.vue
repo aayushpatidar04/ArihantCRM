@@ -2150,7 +2150,7 @@ onBeforeUnmount(() => {
                                     <div
                                         v-for="reaction in message.reactions"
                                         :key="reaction.id"
-                                        class="inline-flex items-center rounded-full border border-surface-200 px-1.5 py-0.5 shadow-sm"
+                                        class="inline-flex items-center rounded-full px-1.5 py-0.5 shadow-sm"
                                     >
                                         <span
                                             class="text-base leading-none"
