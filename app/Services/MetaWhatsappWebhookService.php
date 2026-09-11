@@ -43,7 +43,7 @@ class MetaWhatsappWebhookService
             ->where('is_active', true)
             ->get()
             ->first(
-                fn (MetaWhatsappSetting $setting): bool => hash_equals(
+                fn(MetaWhatsappSetting $setting): bool => hash_equals(
                     $setting->verify_token,
                     $verifyToken
                 )
@@ -64,7 +64,8 @@ class MetaWhatsappWebhookService
     |--------------------------------------------------------------------------
     */
 
-    public function handle(string $payload
+    public function handle(
+        string $payload
     ): void {
         Log::debug('Meta Webhook Processing', [
             'payload_length' => strlen($payload),
@@ -134,7 +135,7 @@ class MetaWhatsappWebhookService
                         'is_active' => $setting?->is_active,
                     ]);
                     continue;
-                }                
+                }
 
                 $setting->update([
                     'last_webhook_at' => now(),
@@ -189,7 +190,8 @@ class MetaWhatsappWebhookService
     |--------------------------------------------------------------------------
     */
 
-    protected function verifySignature(string $payload, string $signature, string $appSecret): void {
+    protected function verifySignature(string $payload, string $signature, string $appSecret): void
+    {
         if (!$appSecret) {
             throw new RuntimeException(
                 'Meta app secret is missing.'
@@ -229,7 +231,8 @@ class MetaWhatsappWebhookService
     |--------------------------------------------------------------------------
     */
 
-    protected function findContact(array $value, array $message): array {
+    protected function findContact(array $value, array $message): array
+    {
         $contacts = $value['contacts'] ?? [];
 
         if (empty($contacts)) {
@@ -259,7 +262,8 @@ class MetaWhatsappWebhookService
     |--------------------------------------------------------------------------
     */
 
-    protected function processInboundMessage(array $message, array $contact, WhatsappNumber $whatsappNumber): void {
+    protected function processInboundMessage(array $message, array $contact, WhatsappNumber $whatsappNumber): void
+    {
         $whatsappMessageId =
             $message['id'] ?? null;
 
@@ -340,17 +344,17 @@ class MetaWhatsappWebhookService
             }
 
             /*
-            * A reaction is an inbound WhatsApp interaction,
-            * so it refreshes the 24-hour customer service window.
-            */
+             * A reaction is an inbound WhatsApp interaction,
+             * so it refreshes the 24-hour customer service window.
+             */
             $customer->update([
                 'last_contacted_at' => now(),
             ]);
 
             /*
-            * Load the same relationships used by normal
-            * inbound messages.
-            */
+             * Load the same relationships used by normal
+             * inbound messages.
+             */
             $reactionMessage->load([
                 'customer',
                 'sentBy:id,name',
@@ -360,9 +364,9 @@ class MetaWhatsappWebhookService
             ]);
 
             /*
-            * Broadcast the reaction so the currently open
-            * chat updates immediately.
-            */
+             * Broadcast the reaction so the currently open
+             * chat updates immediately.
+             */
             broadcast(
                 new NewInboundMessage(
                     $reactionMessage
@@ -530,10 +534,10 @@ class MetaWhatsappWebhookService
         }
 
         /*
-        * ---------------------------------------------------------
-        * FIND ORIGINAL MESSAGE
-        * ---------------------------------------------------------
-        */
+         * ---------------------------------------------------------
+         * FIND ORIGINAL MESSAGE
+         * ---------------------------------------------------------
+         */
 
         $originalMessage = Message::query()
             ->where(
@@ -547,14 +551,14 @@ class MetaWhatsappWebhookService
         }
 
         /*
-        * ---------------------------------------------------------
-        * REMOVE PREVIOUS REACTION FROM SAME CUSTOMER
-        * ON SAME MESSAGE
-        * ---------------------------------------------------------
-        *
-        * One WhatsApp number can have only one reaction
-        * on a particular message.
-        */
+         * ---------------------------------------------------------
+         * REMOVE PREVIOUS REACTION FROM SAME CUSTOMER
+         * ON SAME MESSAGE
+         * ---------------------------------------------------------
+         *
+         * One WhatsApp number can have only one reaction
+         * on a particular message.
+         */
 
         Message::query()
             ->where(
@@ -572,10 +576,10 @@ class MetaWhatsappWebhookService
             ->delete();
 
         /*
-        * ---------------------------------------------------------
-        * CREATE NEW REACTION
-        * ---------------------------------------------------------
-        */
+         * ---------------------------------------------------------
+         * CREATE NEW REACTION
+         * ---------------------------------------------------------
+         */
 
         $reactionMessage = Message::create([
             'customer_id' =>
@@ -597,9 +601,9 @@ class MetaWhatsappWebhookService
                 'inbound',
 
             /*
-            * Keeping emoji in body is useful for fallback
-            * and makes debugging easier.
-            */
+             * Keeping emoji in body is useful for fallback
+             * and makes debugging easier.
+             */
             'body' =>
                 $emoji,
 
@@ -613,8 +617,8 @@ class MetaWhatsappWebhookService
                 $originalMessage->id,
 
             /*
-            * Store complete webhook data.
-            */
+             * Store complete webhook data.
+             */
             'metadata' => $messageData,
         ]);
 
@@ -927,55 +931,55 @@ class MetaWhatsappWebhookService
 
             'image/jpeg',
             'image/jpg' =>
-            'jpg',
+                'jpg',
 
             'image/png' =>
-            'png',
+                'png',
 
             'image/webp' =>
-            'webp',
+                'webp',
 
             'image/gif' =>
-            'gif',
+                'gif',
 
             'video/mp4' =>
-            'mp4',
+                'mp4',
 
             'video/3gpp' =>
-            '3gp',
+                '3gp',
 
             'audio/mpeg' =>
-            'mp3',
+                'mp3',
 
             'audio/ogg' =>
-            'ogg',
+                'ogg',
 
             'audio/aac' =>
-            'aac',
+                'aac',
 
             'audio/amr' =>
-            'amr',
+                'amr',
 
             'audio/opus' =>
-            'opus',
+                'opus',
 
             'application/pdf' =>
-            'pdf',
+                'pdf',
 
             'application/msword' =>
-            'doc',
+                'doc',
 
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document' =>
-            'docx',
+                'docx',
 
             'application/vnd.ms-excel' =>
-            'xls',
+                'xls',
 
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' =>
-            'xlsx',
+                'xlsx',
 
             default =>
-            null,
+                null,
         };
     }
 
@@ -1133,34 +1137,34 @@ class MetaWhatsappWebhookService
         return match ($metaType) {
 
             'text' =>
-            'text',
+                'text',
 
             'image' =>
-            'image',
+                'image',
 
             'document' =>
-            'document',
+                'document',
 
             'audio' =>
-            'audio',
+                'audio',
 
             'video' =>
-            'video',
+                'video',
 
             'sticker' =>
-            'sticker',
+                'sticker',
 
             'location' =>
-            'location',
+                'location',
 
             'contacts' =>
-            'contact',
+                'contact',
 
             'reaction' =>
-            'reaction',
+                'reaction',
 
             default =>
-            'chat',
+                'chat',
         };
     }
 
@@ -1177,43 +1181,85 @@ class MetaWhatsappWebhookService
         return match ($type) {
 
             'text' =>
-            $message['text']['body']
-            ?? null,
+                $message['text']['body']
+                ?? null,
+
+            /*
+             * Normalized chat messages.
+             *
+             * WhatsApp can send:
+             * - button
+             * - interactive button_reply
+             * - interactive list_reply
+             */
+            'chat' => match ($message['type'] ?? null) {
+
+                    /*
+                     * WhatsApp button reply.
+                     */
+                    'button' =>
+                        $message['button']['text']
+                        ?? $message['button']['payload']
+                        ?? null,
+
+                    /*
+                     * WhatsApp interactive replies.
+                     */
+                    'interactive' => match (
+                        $message['interactive']['type'] ?? null
+                        ) {
+
+                            'button_reply' =>
+                                $message['interactive']['button_reply']['title']
+                                ?? $message['interactive']['button_reply']['id']
+                                ?? null,
+
+                            'list_reply' =>
+                                $message['interactive']['list_reply']['title']
+                                ?? $message['interactive']['list_reply']['description']
+                                ?? $message['interactive']['list_reply']['id']
+                                ?? null,
+
+                            default => null,
+                        },
+
+                    default => null,
+                },
 
             'image' =>
-            $message['image']['caption']
-            ?? null,
+                $message['image']['caption']
+                ?? null,
 
             'document' =>
-            $message['document']['caption']
-            ?? null,
+                $message['document']['caption']
+                ?? null,
 
             'video' =>
-            $message['video']['caption']
-            ?? null,
+                $message['video']['caption']
+                ?? null,
 
             'audio' =>
-            null,
+                null,
 
             'sticker' =>
-            null,
+                null,
 
             'location' =>
-            isset($message['location'])
-            ? json_encode(
-                $message['location']
-            )
-            : null,
+                isset($message['location'])
+                ? json_encode(
+                    $message['location']
+                )
+                : null,
 
             'contact' =>
-            isset($message['contacts'])
-            ? json_encode(
-                $message['contacts']
-            )
-            : null,
+                isset($message['contacts'])
+                ? json_encode(
+                    $message['contacts']
+                )
+                : null,
 
             default =>
-            null,
+                null,
         };
     }
 
@@ -1402,7 +1448,7 @@ class MetaWhatsappWebhookService
             ->value('assigned_to');
 
         $currentIndex = $executives->search(
-            fn (User $executive) => (int) $executive->id === (int) $lastAssignedUserId
+            fn(User $executive) => (int) $executive->id === (int) $lastAssignedUserId
         );
 
         $nextExecutive = $currentIndex === false
