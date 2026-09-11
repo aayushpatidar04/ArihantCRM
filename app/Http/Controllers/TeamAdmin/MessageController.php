@@ -1555,8 +1555,24 @@ class MessageController extends Controller
         */
 
         if ($user->hasRole('team_admin')) {
+            $allowed = (int) $customer->team_id === $teamId;
+
+            if (!$allowed) {
+                $allowed = $customer
+                    ->assignedTo()
+                    ->where('users.team_id', $teamId)
+                    ->exists();
+            }
+
+            if (!$allowed) {
+                $allowed = $customer
+                    ->oldOwner()
+                    ->where('users.team_id', $teamId)
+                    ->exists();
+            }
+
             abort_unless(
-                (int) $customer->team_id === $teamId,
+                $allowed,
                 403,
                 'You do not have access to this customer.'
             );
@@ -1605,13 +1621,13 @@ class MessageController extends Controller
         $user = $request->user();
 
         $team = $user->team;
-
+        $teamUserIds = $team->users()->pluck('id')->all();
         abort_unless($team, 403);
 
         abort_unless(
-            $customer->assigned_to === $user->id ||
-            $customer->old_owner_id === $user->id ||
-            $customer->team_id === $team->id,
+            $customer->team_id === $team->id ||
+            in_array($customer->assigned_to, $teamUserIds, true) ||
+            in_array($customer->old_owner_id, $teamUserIds, true),
             403
         );
 

@@ -621,6 +621,29 @@ class DashboardController extends Controller
 
         $teamId = (int) $currentTeam->id;
 
+        $isTeamAdmin = $user->hasRole('team_admin');
+
+        $visibleCustomers = Customer::query()
+            ->select('id')
+            ->when(
+                $isTeamAdmin,
+                function ($q) use ($teamId) {
+                    $q->where('team_id', $teamId)
+                        ->orWhere(function ($q2) use ($teamId) {
+                            $teamUserIds = User::query()
+                                ->select('id')
+                                ->where('team_id', $teamId);
+
+                            $q2->whereIn('assigned_to', $teamUserIds)
+                                ->orWhereIn('old_owner_id', $teamUserIds);
+                        });
+                },
+                function ($q) use ($user) {
+                    $q->where('assigned_to', $user->id)
+                        ->orWhere('old_owner_id', $user->id);
+                }
+            );
+
         /*
         |--------------------------------------------------------------------------
         | Unread inbound messages
@@ -635,12 +658,12 @@ class DashboardController extends Controller
             $specialNumberId,
         ]);
 
-        $authorizedUserIds = \App\Models\User::query()
+        $authorizedUserIds = User::query()
             ->where('team_id', $teamId)
             ->pluck('id')
             ->all();
 
-        $authorizedCustomerIdsForSpecial = \App\Models\Customer::query()
+        $authorizedCustomerIdsForSpecial = Customer::query()
             ->where(function ($query) use ($authorizedUserIds) {
                 $query
                     ->whereIn('assigned_to', $authorizedUserIds)
@@ -652,27 +675,28 @@ class DashboardController extends Controller
         $visibleUnreadMessages = Message::query()
             ->where('direction', 'inbound')
             ->whereNull('read_at')
-            ->where(function ($query) use ($teamId, $specialNumberId, $authorizedCustomerIdsForSpecial) {
+            // ->where(function ($query) use ($teamId, $specialNumberId, $authorizedCustomerIdsForSpecial) {
 
-                /*
-                 * Customers belonging to this team, on the team's normal number.
-                 */
-                $query->where(function ($q) use ($teamId) {
-                    $q->where('team_id', $teamId)
-                        ->where('whatsapp_number_id', $teamId);
-                });
+            //     /*
+            //      * Customers belonging to this team, on the team's normal number.
+            //      */
+            //     $query->where(function ($q) use ($teamId) {
+            //         $q->where('team_id', $teamId);
+            //     });
 
-                /*
-                 * OR — messages on the special-session number where the customer
-                 * is assigned to (or previously owned by) a user on this team.
-                 */
-                if ($specialNumberId) {
-                    $query->orWhere(function ($q) use ($specialNumberId, $authorizedCustomerIdsForSpecial) {
-                        $q->where('whatsapp_number_id', $specialNumberId)
-                            ->whereIn('customer_id', $authorizedCustomerIdsForSpecial);
-                    });
-                }
-            });
+            //     /*
+            //      * OR — messages on the special-session number where the customer
+            //      * is assigned to (or previously owned by) a user on this team.
+            //      */
+            //     if ($specialNumberId) {
+            //         $query->orWhere(function ($q) use ($specialNumberId, $authorizedCustomerIdsForSpecial) {
+            //             $q->where('whatsapp_number_id', $specialNumberId)
+            //                 ->whereIn('customer_id', $authorizedCustomerIdsForSpecial);
+            //         });
+            //     }
+            // });
+            ->whereIn('whatsapp_number_id', $visibleNumberIds)
+            ->whereIn('customer_id', $visibleCustomers);
 
         /*
         |--------------------------------------------------------------------------
