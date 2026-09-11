@@ -1668,7 +1668,7 @@ onBeforeUnmount(() => {
                                 <h1
                                     class="text-sm font-semibold text-surface-900 truncate"
                                 >
-                                    {{ customer.name }}
+                                    {{ customer.name }} - #{{ customer.bitrix_lead_id }}
                                 </h1>
 
                                 <p class="text-xs text-surface-500 mt-0.5">

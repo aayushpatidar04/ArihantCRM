@@ -302,7 +302,7 @@ const formatTime = (value) => {
                                     customer.unread_count ? 'font-bold' : ''
                                 "
                             >
-                                {{ customer.name }}
+                                {{ customer.name }} - #{{ customer.bitrix_lead_id }}
                             </p>
 
                             <span

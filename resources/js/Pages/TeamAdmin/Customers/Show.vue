@@ -120,7 +120,7 @@ const assignCustomer = () => {
                 >
                     <div>
                         <h1 class="text-xl font-semibold text-surface-900">
-                            {{ customer.name }}
+                            {{ customer.name }} - #{{ customer.bitrix_lead_id }}
                         </h1>
 
                         <p class="text-sm text-surface-500 mt-1">
@@ -165,7 +165,7 @@ const assignCustomer = () => {
                         <p class="text-xs text-surface-500 mb-1">Name</p>
 
                         <p class="text-sm font-medium text-surface-900">
-                            {{ customer.name || "—" }}
+                            {{ customer.name || "—" }} - #{{ customer.bitrix_lead_id }}
                         </p>
                     </div>
 

@@ -240,7 +240,7 @@ const formatTime = (value) => {
                     <div
                         class="w-11 h-11 rounded-full bg-surface-100 flex items-center justify-center shrink-0 text-sm font-semibold text-surface-600"
                     >
-                        {{ customer.name?.charAt(0)?.toUpperCase() || "?" }}
+                        {{ customer.name?.charAt(0)?.toUpperCase() || "?" }} - #{{ customer.bitrix_lead_id }}
                     </div>
 
                     <!-- Main -->
@@ -255,7 +255,7 @@ const formatTime = (value) => {
                                         : 'font-semibold'
                                 "
                             >
-                                {{ customer.name }}
+                                {{ customer.name }} - #{{ customer.bitrix_lead_id }}
                             </p>
 
                             <span

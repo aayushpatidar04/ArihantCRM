@@ -202,7 +202,7 @@ const statusClass = (status) => {
                                 <td class="px-5 py-4">
                                     <div>
                                         <p class="font-medium text-surface-900">
-                                            {{ customer.name }}
+                                            {{ customer.name }} - #{{ customer.bitrix_lead_id }}
                                         </p>
 
                                         <p

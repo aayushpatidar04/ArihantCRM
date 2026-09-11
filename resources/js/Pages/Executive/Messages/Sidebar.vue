@@ -450,7 +450,7 @@ watch(
                                     Number(customer.unread_count || 0) > 0,
                             }"
                         >
-                            {{ customer.name || "Unknown Customer" }}
+                            {{ customer.name || "Unknown Customer" }} - #{{ customer.bitrix_lead_id }}
                         </h3>
 
                         <span

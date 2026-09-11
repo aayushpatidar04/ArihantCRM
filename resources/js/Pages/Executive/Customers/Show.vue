@@ -75,7 +75,7 @@ const submit = () => {
                 >
                     <div>
                         <h1 class="text-xl font-semibold text-surface-900">
-                            {{ customer.name }}
+                            {{ customer.name }} - #{{ customer.bitrix_lead_id }}
                         </h1>
 
                         <p class="text-sm text-surface-500 mt-1">
