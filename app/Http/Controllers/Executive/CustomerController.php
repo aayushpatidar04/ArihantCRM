@@ -189,7 +189,8 @@ class CustomerController extends Controller
             'phone' => [
                 'required',
                 'string',
-                'max:30',
+                'size:12',
+                'regex:/^[0-9]+$/',
             ],
         ]);
 
