@@ -41,7 +41,13 @@ class CustomerController extends Controller
         );
 
         $customers = Customer::query()
-            ->where('team_id', $team->id)
+            ->where(function ($query) use ($team) {
+                $query
+                    ->where('team_id', $team->id)
+                    ->orWhereHas('oldOwner', function ($oldOwnerQuery) use ($team) {
+                        $oldOwnerQuery->where('team_id', $team->id);
+                    });
+            })
 
             /*
             |--------------------------------------------------------------------------

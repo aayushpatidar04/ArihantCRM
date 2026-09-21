@@ -103,7 +103,10 @@ class MessageController extends Controller
                      * Team Admin can access every customer of this team,
                      * including unassigned customers.
                      */
-                    $query->where('team_id', $team->id);
+                    $query->where('team_id', $team->id)
+                        ->orWhereHas('oldOwner', function ($q) use ($team) {
+                            $q->where('users.team_id', $team->id);
+                        });
 
                     return;
                 }
