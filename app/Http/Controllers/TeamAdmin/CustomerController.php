@@ -260,7 +260,7 @@ class CustomerController extends Controller
         abort_unless($team, 403, 'No workspace selected.');
 
         abort_unless(
-            (int) $customer->team_id === (int) $team->id,
+            (int) $customer->team_id === (int) $team->id || (int) optional($customer->oldOwner)->team_id === (int) $team->id,
             403
         );
 
