@@ -579,7 +579,7 @@ class MessageController extends Controller
         |--------------------------------------------------------------------------
         */
 
-        if ((int) $customer->team_id !== (int) $team->id) {
+        if ((int) $customer->team_id !== (int) $team->id && (int) optional($customer->oldOwner)->team_id !== (int) $team->id) {
             abort(403);
         }
 
@@ -826,7 +826,7 @@ class MessageController extends Controller
         */
 
         abort_unless(
-            (int) $customer->team_id === (int) $team->id,
+            (int) $customer->team_id === (int) $team->id || (int) optional($customer->oldOwner)->team_id === (int) $team->id,
             403
         );
 
