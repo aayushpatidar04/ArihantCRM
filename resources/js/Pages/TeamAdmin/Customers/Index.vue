@@ -1,7 +1,10 @@
 <script setup>
 import { ref, watch } from "vue";
 import { Head, Link, router, useForm } from "@inertiajs/vue3";
-
+import { Download, X } from "lucide-vue-next";
+import Modal from "@/Components/Modal.vue";
+import InputError from "@/Components/InputError.vue";
+import PrimaryButton from "@/Components/PrimaryButton.vue"
 import TeamAdminLayout from "@/Components/Layout/TeamAdminLayout.vue";
 
 const props = defineProps({
@@ -137,22 +140,25 @@ const fetchBitrixLead = () => {
                     </p>
                 </div>
 
-                <Link
-                    :href="route('team-admin.customers.create')"
-                    class="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-slate-600 text-white text-sm font-medium hover:bg-slate-900 transition"
-                >
-                    + Add Customer
-                </Link>
+                <div>
+                    <Link
+                        :href="route('team-admin.customers.create')"
+                        class="inline-flex items-center justify-center px-4 py-2 rounded-lg bg-slate-600 text-white text-sm font-medium hover:bg-slate-900 transition"
+                    >
+                        + Add Customer
+                    </Link>
+    
+                    <button
+                        type="button"
+                        @click="openFetchLeadModal"
+                        class="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100"
+                    >
+                        <Download class="h-4 w-4" />
+    
+                        Fetch Bitrix Lead
+                    </button>
+                </div>
 
-                <button
-                    type="button"
-                    @click="openFetchLeadModal"
-                    class="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100"
-                >
-                    <Download class="h-4 w-4" />
-
-                    Fetch Bitrix Lead
-                </button>
             </div>
 
             <!-- Search -->
