@@ -504,7 +504,7 @@ class TeamController extends Controller
                 'success',
                 'Departments and agents synchronized successfully.'
             );
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             report($e);
 
             return back()->with(

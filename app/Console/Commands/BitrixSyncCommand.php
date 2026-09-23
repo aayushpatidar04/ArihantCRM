@@ -1085,29 +1085,32 @@ class BitrixSyncCommand extends Command
             /*
              * Update primary team.
              */
-            User::where('id', $userId)
-                ->update([
+            $user = User::find($userId);
+
+            if ($user && is_null($user->team_id)) {
+
+                User::where('id', $userId)
+                    ->update([
+                        'team_id' => $teamId,
+                    ]);
+
+                /*
+                 * User has no primary team yet.
+                 *
+                 * Give them exactly one user_team_access record
+                 * for their newly assigned primary team.
+                 */
+                DB::table('user_team_access')
+                    ->where('user_id', $userId)
+                    ->delete();
+
+                DB::table('user_team_access')->insert([
+                    'user_id' => $userId,
                     'team_id' => $teamId,
+                    'created_at' => now(),
+                    'updated_at' => now(),
                 ]);
-
-            /*
-             * Executive must have exactly ONE user_team_access record.
-             *
-             * Remove every existing access record first.
-             */
-            DB::table('user_team_access')
-                ->where('user_id', $userId)
-                ->delete();
-
-            /*
-             * Then create the single primary-team access record.
-             */
-            DB::table('user_team_access')->insert([
-                'user_id' => $userId,
-                'team_id' => $teamId,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ]);
+            }
         }
     }
 
