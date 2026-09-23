@@ -122,7 +122,7 @@ class SendWhatsappMediaJob implements ShouldQueue
 
             $document->update([
                 'message_id' => $message->id,
-                'status' => 'sent',
+                'status' => 'approved',
             ]);
 
             $message->customer->update([
@@ -145,7 +145,7 @@ class SendWhatsappMediaJob implements ShouldQueue
 
             if ($document) {
                 $document->update([
-                    'status' => 'failed',
+                    'status' => 'rejected',
                     'notes' => $e->getMessage(),
                 ]);
             }

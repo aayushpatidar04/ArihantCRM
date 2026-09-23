@@ -735,6 +735,12 @@ class MessageController extends Controller
             |--------------------------------------------------------------------------
             */
 
+            $mediaCaption =
+                $index === 0 &&
+                in_array($type, ['image', 'video', 'document'], true)
+                ? $caption
+                : null;
+
             $document = Document::create([
                 'customer_id' => $customer->id,
 
@@ -776,7 +782,7 @@ class MessageController extends Controller
                 'sent_by' => $user->id,
                 'direction' => 'outbound',
                 'type' => $type,
-                'body' => $caption,
+                'body' => $mediaCaption,
                 'status' => 'pending',
                 'is_forwarded' => false,
             ]);

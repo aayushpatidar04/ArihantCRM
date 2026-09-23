@@ -1365,7 +1365,7 @@ const sendAttachment = async () => {
             await appendOwnMessage(message);
         }
 
-        selectedFile.value = null;
+        selectedFiles.value = [];
 
         messageText.value = "";
         success("Media sent.");
