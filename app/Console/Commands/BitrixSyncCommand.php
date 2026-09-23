@@ -1071,12 +1071,12 @@ class BitrixSyncCommand extends Command
 
         foreach ($this->agentPrimaryDept as $bitrixUserId => $departmentId) {
 
-            if (!isset($this->userMap[$bitrixUserId])) {
-                continue;
-            }
             if (in_array($bitrixUserId, ['5155', '5157', '5159'])) {
                 \Log::info('Bitrix User Id: ' . $bitrixUserId);
-                \Log::info($this->teamMap[$departmentId] ?? 'No team mapping found');
+                \Log::info($this->userMap[$bitrixUserId] ?? 'No bitrix user found');
+            }
+            if (!isset($this->userMap[$bitrixUserId])) {
+                continue;
             }
 
             if (!isset($this->teamMap[$departmentId])) {
