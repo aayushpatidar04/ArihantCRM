@@ -17,6 +17,7 @@ use App\Services\MetaWhatsappService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
@@ -333,7 +334,7 @@ class MessageController extends Controller
         $hasMoreMessages = $totalMessages > $messages->count();
 
         $first = $messages->first();
-        
+
         $nextCursor = is_array($first)
             ? ($first['id'] ?? null)
             : ($first->id ?? null);
@@ -808,13 +809,15 @@ class MessageController extends Controller
         $validated = $request->validate([
             'media' => [
                 'required',
-                'file',
-                'max:16384',
+                'array',
+                'min:1',
+                'max:5',
             ],
 
-            'type' => [
+            'media.*' => [
                 'required',
-                'in:image,document,audio,video',
+                'file',
+                'max:16384',
             ],
 
             'caption' => [
@@ -824,7 +827,7 @@ class MessageController extends Controller
             ],
         ]);
 
-        $file = $validated['media'];
+        $files = $validated['media'];
 
         $type = $validated['type'];
 
@@ -875,90 +878,92 @@ class MessageController extends Controller
             $customer->id
         );
 
-        $storedFilename =
-            Str::uuid() .
-            '.' .
-            $file->getClientOriginalExtension();
+        $createdMessages = [];
 
-        $path = $file->storeAs(
-            $directory,
-            $storedFilename,
-            $disk
-        );
+        foreach ($files as $index => $file) {
+            $type = $this->resolveMediaType(
+                $file->getMimeType()
+            );
 
-        abort_unless(
-            $path,
-            422,
-            'Unable to store the uploaded file.'
-        );
+            abort_unless(
+                $type !== null,
+                422,
+                "Unsupported media type: {$file->getMimeType()}"
+            );
 
-        /*
-        |--------------------------------------------------------------------------
-        | Document
-        |--------------------------------------------------------------------------
-        */
+            $storedFilename =
+                Str::uuid()
+                . '.'
+                . $file->getClientOriginalExtension();
 
-        $document = Document::create([
-            'customer_id' => $customer->id,
-            'team_id' => $team->id,
-            'message_id' => null,
-            'uploaded_by' => $user->id,
-
-            'original_filename' =>
-                $file->getClientOriginalName(),
-
-            'stored_filename' =>
+            $path = $file->storeAs(
+                $directory,
                 $storedFilename,
+                $disk
+            );
 
-            'disk' => $disk,
-            'path' => $path,
+            abort_unless(
+                $path,
+                422,
+                'Unable to store the uploaded file.'
+            );
 
-            'mime_type' =>
-                $file->getMimeType(),
+            /*
+             * Caption only belongs to the first media.
+             *
+             * Audio does not support captions.
+             */
+            $mediaCaption =
+                $index === 0 &&
+                in_array($type, ['image', 'video', 'document'], true)
+                ? $caption
+                : null;
 
-            'size' =>
-                $file->getSize(),
+            $document = Document::create([
+                'customer_id' => $customer->id,
+                'team_id' => $team->id,
+                'message_id' => null,
+                'uploaded_by' => $user->id,
+                'original_filename' =>
+                    $file->getClientOriginalName(),
+                'stored_filename' =>
+                    $storedFilename,
+                'disk' => $disk,
+                'path' => $path,
+                'mime_type' =>
+                    $file->getMimeType(),
+                'size' =>
+                    $file->getSize(),
+                'source' => 'whatsapp',
+                'status' => 'pending',
+                'notes' => $mediaCaption,
+            ]);
 
-            'source' => 'whatsapp',
-            'status' => 'pending',
-            'notes' => $caption,
-        ]);
+            $message = Message::create([
+                'customer_id' => $customer->id,
+                'team_id' => $messageTeam->id,
+                'whatsapp_number_id' => $whatsappNumber->id,
+                'sent_by' => $user->id,
+                'direction' => 'outbound',
+                'type' => $type,
+                'body' => $mediaCaption,
+                'status' => 'pending',
+                'is_forwarded' => false,
+            ]);
 
-        /*
-        |--------------------------------------------------------------------------
-        | Message
-        |--------------------------------------------------------------------------
-        */
+            $document->update([
+                'message_id' => $message->id,
+            ]);
 
-        $message = Message::create([
-            'customer_id' => $customer->id,
-            'team_id' => $messageTeam->id,
-            'whatsapp_number_id' => $whatsappNumber->id,
-            'sent_by' => $user->id,
+            event(
+                new MessageCreated($message)
+            );
 
-            'direction' => 'outbound',
-            'type' => $type,
-            'body' => $caption,
-
-            'status' => 'pending',
-            'is_forwarded' => false,
-        ]);
-
-        $document->update([
-            'message_id' => $message->id,
-        ]);
-
-        /*
-        |--------------------------------------------------------------------------
-        | Broadcast
-        |--------------------------------------------------------------------------
-        */
-
-        event(
-            new MessageCreated(
-                $message
-            )
-        );
+            $createdMessages[] = [
+                'message_id' => $message->id,
+                'document_id' => $document->id,
+            ];
+        }
 
         /*
         |--------------------------------------------------------------------------
@@ -966,18 +971,30 @@ class MessageController extends Controller
         |--------------------------------------------------------------------------
         */
 
-        SendWhatsappMediaJob::dispatch(
-            $message->id,
-            $document->id,
-            $whatsappNumber->id
-        );
+        $jobs = collect($createdMessages)
+            ->map(function ($item) use ($whatsappNumber) {
+                return new SendWhatsappMediaJob(
+                    $item['message_id'],
+                    $item['document_id'],
+                    $whatsappNumber->id
+                );
+            })
+            ->all();
+
+        Bus::chain($jobs)->dispatch();
 
         return response()->json([
             'success' => true,
-
-            'message' => $message->fresh([
-                'document',
-            ]),
+            'messages' => Message::query()
+                ->whereIn(
+                    'id',
+                    collect($createdMessages)
+                        ->pluck('message_id')
+                        ->all()
+                )
+                ->with('document')
+                ->orderBy('id')
+                ->get(),
         ], 201);
     }
 
@@ -1647,5 +1664,37 @@ class MessageController extends Controller
             $phone,
             -4
         );
+    }
+
+    protected function resolveMediaType(string $mimeType): ?string
+    {
+        if (str_starts_with($mimeType, 'image/')) {
+            return 'image';
+        }
+
+        if (str_starts_with($mimeType, 'video/')) {
+            return 'video';
+        }
+
+        if (str_starts_with($mimeType, 'audio/')) {
+            return 'audio';
+        }
+
+        if (
+            $mimeType === 'application/pdf' ||
+            str_starts_with($mimeType, 'application/msword') ||
+            str_starts_with(
+                $mimeType,
+                'application/vnd.openxmlformats-officedocument'
+            ) ||
+            str_starts_with(
+                $mimeType,
+                'application/vnd.ms-excel'
+            )
+        ) {
+            return 'document';
+        }
+
+        return null;
     }
 }

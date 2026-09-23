@@ -174,6 +174,20 @@ const showWindowClosedError = () => {
     error("The 24-hour WhatsApp window is closed. Please use a template.");
 };
 
+function formatFileSize(bytes) {
+    if (!bytes) {
+        return "0 KB";
+    }
+
+    const units = ["B", "KB", "MB", "GB"];
+    const index = Math.min(
+        Math.floor(Math.log(bytes) / Math.log(1024)),
+        units.length - 1,
+    );
+
+    return `${(bytes / Math.pow(1024, index)).toFixed(1)} ${units[index]}`;
+}
+
 /*
 |--------------------------------------------------------------------------
 | Current Team
@@ -241,7 +255,7 @@ const showDatePicker = ref(false);
 */
 
 const messageText = ref("");
-const selectedFile = ref(null);
+const selectedFiles = ref(null);
 
 const composerMode = ref(
     props.conversation.window_open ? "normal" : "template",
@@ -1124,19 +1138,25 @@ const buildTemplateComponents = () => {
 |--------------------------------------------------------------------------
 */
 
-const selectFile = (event) => {
-    const file = event.target.files?.[0];
+function selectFiles(event) {
+    const files = Array.from(event.target.files || []);
 
-    if (!file) {
+    if (!files.length) {
         return;
     }
 
-    selectedFile.value = file;
-};
+    selectedFiles.value = [...selectedFiles.value, ...files];
 
-const removeFile = () => {
-    selectedFile.value = null;
-};
+    event.target.value = "";
+}
+
+function removeFile(index) {
+    selectedFiles.value.splice(index, 1);
+}
+
+function clearFiles() {
+    selectedFiles.value = [];
+}
 
 const detectFileType = (file) => {
     if (file.type.startsWith("image/")) {
@@ -1208,7 +1228,7 @@ const sendTextMessage = async () => {
 };
 
 const sendAttachment = async () => {
-    if (!selectedFile.value) {
+    if (!selectedFiles.value.length) {
         return;
     }
 
@@ -1219,9 +1239,11 @@ const sendAttachment = async () => {
 
     const form = new FormData();
 
-    form.append("type", detectFileType(selectedFile.value));
+    // form.append("type", detectFileType(selectedFile.value));
 
-    form.append("media", selectedFile.value);
+    selectedFiles.value.forEach((file) => {
+        form.append("media[]", file);
+    });
 
     if (messageText.value?.trim()) {
         form.append("caption", messageText.value.trim());
@@ -1241,9 +1263,11 @@ const sendAttachment = async () => {
             },
         );
 
-        await appendOwnMessage(response.data.message);
+        for (const message of response.data.messages ?? []) {
+            await appendOwnMessage(message);
+        }
 
-        selectedFile.value = null;
+        selectedFiles.value = [];
         messageText.value = "";
 
         success("Media sent.");
@@ -1261,7 +1285,7 @@ const sendCurrentMessage = () => {
         return;
     }
 
-    if (selectedFile.value) {
+    if (selectedFiles.value.length) {
         sendAttachment();
         return;
     }
@@ -1641,7 +1665,9 @@ onBeforeUnmount(() => {
                  CHAT
             ====================================================== -->
 
-            <main class="flex-1 min-w-0 min-h-0 overflow-y-auto hide-scrollbar flex flex-col bg-surface-50">
+            <main
+                class="flex-1 min-w-0 min-h-0 overflow-y-auto hide-scrollbar flex flex-col bg-surface-50"
+            >
                 <!-- Header -->
 
                 <div
@@ -1668,7 +1694,9 @@ onBeforeUnmount(() => {
                                 <h1
                                     class="text-sm font-semibold text-surface-900 truncate"
                                 >
-                                    {{ customer.name }} - #{{ customer.bitrix_lead_id }}
+                                    {{ customer.name }} - #{{
+                                        customer.bitrix_lead_id
+                                    }}
                                 </h1>
 
                                 <p class="text-xs text-surface-500 mt-0.5">
@@ -2689,6 +2717,10 @@ onBeforeUnmount(() => {
                                             class="w-4 h-4 animate-spin"
                                         />
 
+                                        <span v-if="sending">
+                                            Sending {{ selectedFiles.length }} files...
+                                        </span>
+
                                         <Send v-else class="w-4 h-4" />
 
                                         {{
@@ -2706,26 +2738,70 @@ onBeforeUnmount(() => {
 
                     <div v-if="composerMode === 'normal'" class="p-4">
                         <div
-                            v-if="selectedFile"
-                            class="mb-3 flex items-center justify-between rounded-lg bg-surface-50 border border-surface-200 px-3 py-2"
+                            v-if="selectedFiles.length"
+                            class="mb-3 rounded-lg bg-surface-50 border border-surface-200 p-3"
                         >
-                            <div class="flex items-center gap-2 min-w-0">
-                                <Paperclip
-                                    class="w-4 h-4 text-surface-500 shrink-0"
-                                />
+                            <div class="flex items-center justify-between mb-2">
+                                <p
+                                    class="text-xs font-semibold text-surface-700"
+                                >
+                                    {{ selectedFiles.length }}
+                                    {{
+                                        selectedFiles.length === 1
+                                            ? "file"
+                                            : "files"
+                                    }}
+                                    selected
+                                </p>
 
-                                <span class="text-xs text-surface-700 truncate">
-                                    {{ selectedFile.name }}
-                                </span>
+                                <button
+                                    type="button"
+                                    @click="clearFiles"
+                                    :disabled="sending"
+                                    class="text-[11px] font-medium text-surface-400 hover:text-red-600 disabled:opacity-50"
+                                >
+                                    Clear all
+                                </button>
                             </div>
 
-                            <button
-                                type="button"
-                                @click="removeFile"
-                                class="text-surface-400 hover:text-red-600"
-                            >
-                                <X class="w-4 h-4" />
-                            </button>
+                            <div class="space-y-1.5 max-h-32 overflow-y-auto">
+                                <div
+                                    v-for="(file, index) in selectedFiles"
+                                    :key="`${file.name}-${file.size}-${index}`"
+                                    class="flex items-center justify-between gap-3 rounded-lg bg-white border border-surface-200 px-3 py-2"
+                                >
+                                    <div
+                                        class="flex items-center gap-2 min-w-0"
+                                    >
+                                        <Paperclip
+                                            class="w-4 h-4 text-surface-500 shrink-0"
+                                        />
+
+                                        <div class="min-w-0">
+                                            <p
+                                                class="text-xs text-surface-700 truncate"
+                                            >
+                                                {{ file.name }}
+                                            </p>
+
+                                            <p
+                                                class="text-[10px] text-surface-400"
+                                            >
+                                                {{ formatFileSize(file.size) }}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <button
+                                        type="button"
+                                        @click="removeFile(index)"
+                                        :disabled="sending"
+                                        class="text-surface-400 hover:text-red-600 shrink-0 disabled:opacity-50"
+                                    >
+                                        <X class="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
                         </div>
 
                         <div class="flex items-end gap-2">
@@ -2737,8 +2813,9 @@ onBeforeUnmount(() => {
                                 <input
                                     type="file"
                                     class="hidden"
+                                    multiple
                                     accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx"
-                                    @change="selectFile"
+                                    @change="selectFiles"
                                 />
                             </label>
 
@@ -2757,7 +2834,8 @@ onBeforeUnmount(() => {
                                 @click="sendCurrentMessage"
                                 :disabled="
                                     sending ||
-                                    (!selectedFile && !messageText.trim())
+                                    (!selectedFiles.length &&
+                                        !messageText.trim())
                                 "
                                 class="w-10 h-10 rounded-lg bg-slate-700 text-white flex items-center justify-center hover:bg-slate-900 disabled:opacity-50"
                             >
