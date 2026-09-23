@@ -1074,7 +1074,7 @@ class BitrixSyncCommand extends Command
             if (!isset($this->userMap[$bitrixUserId])) {
                 continue;
             }
-            \log::info('Bitrix User Id: ' . $bitrixUserId);
+            \Log::info('Bitrix User Id: ' . $bitrixUserId);
             \Log::info($this->teamMap[$departmentId]);
             if (!isset($this->teamMap[$departmentId])) {
                 continue;
