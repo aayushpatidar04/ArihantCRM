@@ -1069,15 +1069,12 @@ class BitrixSyncCommand extends Command
          * exactly ONE record for the executive
          */
 
-        \Log::info($this->userMap);
-        \Log::info($this->teamMap);
-        
         foreach ($this->agentPrimaryDept as $bitrixUserId => $departmentId) {
 
             if (!isset($this->userMap[$bitrixUserId])) {
                 continue;
             }
-
+            \Log::info($this->teamMap[$departmentId]);
             if (!isset($this->teamMap[$departmentId])) {
                 continue;
             }
