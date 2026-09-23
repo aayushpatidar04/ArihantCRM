@@ -1068,13 +1068,9 @@ class BitrixSyncCommand extends Command
          *      =
          * exactly ONE record for the executive
          */
-
+        \Log::info($this->agentPrimaryDept);
         foreach ($this->agentPrimaryDept as $bitrixUserId => $departmentId) {
 
-            if (in_array($bitrixUserId, ['5155', '5157', '5159'])) {
-                \Log::info('Bitrix User Id: ' . $bitrixUserId);
-                \Log::info($this->userMap[$bitrixUserId] ?? 'No bitrix user found');
-            }
             if (!isset($this->userMap[$bitrixUserId])) {
                 continue;
             }
