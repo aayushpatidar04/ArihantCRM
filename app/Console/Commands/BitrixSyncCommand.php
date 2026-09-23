@@ -764,14 +764,14 @@ class BitrixSyncCommand extends Command
 
         foreach ($this->agents as $bitrixUserId => $agent) {
             $bitrixUserId = (string) $bitrixUserId;
-
+            $email = $this->getAgentEmail($agent);
             /*
              * Only create new users when Bitrix says they are active.
              */
             $isActive = $this->isAgentActive($agent);
 
             $user = User::withTrashed()
-                ->where('bitrix_user_id', $bitrixUserId)
+                ->where('bitrix_user_id', $bitrixUserId)->orWhere('email', $email)
                 ->first();
 
             /*
