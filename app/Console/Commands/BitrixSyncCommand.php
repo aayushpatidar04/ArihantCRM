@@ -581,7 +581,9 @@ class BitrixSyncCommand extends Command
             }
 
             $departmentIds = $this->getAgentDepartmentIds($agent);
-
+            if(in_array($agentId, ['5155', '5157', '5159'])){
+                \Log::info($departmentIds);
+            }
             if (empty($departmentIds)) {
                 continue;
             }
