@@ -1069,6 +1069,9 @@ class BitrixSyncCommand extends Command
          * exactly ONE record for the executive
          */
 
+        \Log::info($this->userMap);
+        \Log::info($this->teamMap);
+        
         foreach ($this->agentPrimaryDept as $bitrixUserId => $departmentId) {
 
             if (!isset($this->userMap[$bitrixUserId])) {
@@ -1079,6 +1082,7 @@ class BitrixSyncCommand extends Command
                 continue;
             }
 
+            
             $userId = $this->userMap[$bitrixUserId];
             $teamId = $this->teamMap[$departmentId];
 
