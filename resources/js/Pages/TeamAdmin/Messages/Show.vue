@@ -3006,7 +3006,7 @@ const messageBorderClass = (message) => {
                                     class="hidden"
                                     multiple
                                     accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx"
-                                    @change="selectFile"
+                                    @change="selectFiles"
                                 />
                             </label>
 
