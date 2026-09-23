@@ -582,7 +582,7 @@ class BitrixSyncCommand extends Command
 
             $departmentIds = $this->getAgentDepartmentIds($agent);
             \Log::info($agentId);
-            \Log::info($departmentIds);            }
+            \Log::info($departmentIds);
             if (empty($departmentIds)) {
                 continue;
             }
