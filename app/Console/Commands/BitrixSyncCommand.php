@@ -1087,7 +1087,7 @@ class BitrixSyncCommand extends Command
              */
             $user = User::find($userId);
 
-            if ($user && is_null($user->team_id)) {
+            if ($user && !$user->team_id) {
 
                 User::where('id', $userId)
                     ->update([
