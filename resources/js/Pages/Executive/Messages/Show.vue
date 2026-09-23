@@ -255,7 +255,7 @@ const showDatePicker = ref(false);
 */
 
 const messageText = ref("");
-const selectedFiles = ref(null);
+const selectedFiles = ref([]);
 
 const composerMode = ref(
     props.conversation.window_open ? "normal" : "template",

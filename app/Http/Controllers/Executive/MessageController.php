@@ -829,8 +829,6 @@ class MessageController extends Controller
 
         $files = $validated['media'];
 
-        $type = $validated['type'];
-
         $caption = $validated['caption'] ?? null;
 
         /*

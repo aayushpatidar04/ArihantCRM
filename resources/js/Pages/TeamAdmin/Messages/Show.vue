@@ -41,19 +41,23 @@ const responseErrorMessage = (requestError, fallback) => {
         .flat()
         .find(Boolean);
 
-    return responseData?.message
-        || responseData?.failure_reason
-        || validationError
-        || (typeof responseData === "string" ? responseData : null)
-        || requestError?.message
-        || fallback;
+    return (
+        responseData?.message ||
+        responseData?.failure_reason ||
+        validationError ||
+        (typeof responseData === "string" ? responseData : null) ||
+        requestError?.message ||
+        fallback
+    );
 };
 
 const showWindowClosedError = () => {
     error("The 24-hour WhatsApp window is closed. Please use a template.");
 };
 
-const currentTeam = computed(() => page.props.workspace?.current_team ?? props.customer?.team ?? null);
+const currentTeam = computed(
+    () => page.props.workspace?.current_team ?? props.customer?.team ?? null,
+);
 
 const props = defineProps({
     customer: {
@@ -171,7 +175,7 @@ const showDatePicker = ref(false);
 
 const messageText = ref("");
 
-const selectedFile = ref(null);
+const selectedFiles = ref([]);
 
 const composerMode = ref(
     props.conversation.window_open ? "normal" : "template",
@@ -372,6 +376,20 @@ const formatFullDate = (date) => {
         year: "numeric",
     });
 };
+
+function formatFileSize(bytes) {
+    if (!bytes) {
+        return '0 KB';
+    }
+
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const index = Math.min(
+        Math.floor(Math.log(bytes) / Math.log(1024)),
+        units.length - 1
+    );
+
+    return `${(bytes / Math.pow(1024, index)).toFixed(1)} ${units[index]}`;
+}
 
 const shouldShowDateSeparator = (index) => {
     if (index === 0) {
@@ -1201,26 +1219,32 @@ const buildTemplateComponents = () => {
 |--------------------------------------------------------------------------
 */
 
-const selectFile = (event) => {
-    const file = event.target.files?.[0];
+function selectFiles(event) {
+    const files = Array.from(event.target.files || []);
 
-    if (!file) {
+    if (!files.length) {
         return;
     }
 
-    selectedFile.value = file;
-};
+    selectedFiles.value = [...selectedFiles.value, ...files];
 
-const removeFile = () => {
-    selectedFile.value = null;
-};
+    event.target.value = "";
+}
+
+function removeFile(index) {
+    selectedFiles.value.splice(index, 1);
+}
+
+function clearFiles() {
+    selectedFiles.value = [];
+}
 
 const sendCurrentMessage = () => {
     if (sending.value) {
         return;
     }
 
-    if (selectedFile.value) {
+    if (selectedFiles.value.length) {
         sendAttachment();
 
         return;
@@ -1301,7 +1325,7 @@ const detectFileType = (file) => {
 };
 
 const sendAttachment = async () => {
-    if (!selectedFile.value) {
+    if (!selectedFiles.value.length) {
         return;
     }
 
@@ -1312,9 +1336,11 @@ const sendAttachment = async () => {
 
     const form = new FormData();
 
-    form.append("type", detectFileType(selectedFile.value));
+    // form.append("type", detectFileType(selectedFile.value));
 
-    form.append("media", selectedFile.value);
+    selectedFiles.value.forEach((file) => {
+        form.append('media[]', file);
+    });
 
     if (messageText.value?.trim()) {
         form.append("caption", messageText.value.trim());
@@ -1335,7 +1361,9 @@ const sendAttachment = async () => {
             },
         );
 
-        await appendOwnMessage(response.data.message);
+        for (const message of response.data.messages ?? []) {
+            await appendOwnMessage(message);
+        }
 
         selectedFile.value = null;
 
@@ -1465,112 +1493,120 @@ const handleRealtimeReaction = (reaction) => {
 |--------------------------------------------------------------------------
 */
 
-usePrivateChannel(`whatsapp.team.${currentTeam.value?.id ?? props.customer.team_id}`, {
-    "message.created": (event) => {
-        const message = event.message;
+usePrivateChannel(
+    `whatsapp.team.${currentTeam.value?.id ?? props.customer.team_id}`,
+    {
+        "message.created": (event) => {
+            const message = event.message;
 
-        if (!message) {
-            return;
-        }
+            if (!message) {
+                return;
+            }
 
-        if (Number(message.sent_by) === Number(page.props.auth?.user?.id)) {
-            return;
-        }
+            if (Number(message.sent_by) === Number(page.props.auth?.user?.id)) {
+                return;
+            }
 
-        if (Number(message.customer_id) !== Number(props.customer.id)) {
-            return;
-        }
+            if (Number(message.customer_id) !== Number(props.customer.id)) {
+                return;
+            }
 
-        if (messageExists(message.id)) {
-            return;
-        }
+            if (messageExists(message.id)) {
+                return;
+            }
 
-        if (activeSearch.value || loadingAroundDate.value) {
-            return;
-        }
+            if (activeSearch.value || loadingAroundDate.value) {
+                return;
+            }
 
-        messageList.value.push(normalizeMessage(message));
+            messageList.value.push(normalizeMessage(message));
 
-        sortMessages();
+            sortMessages();
 
-        if (isNearBottom.value) {
-            nextTick(() => {
-                scrollToBottom();
-            });
-        } else {
-            showJumpToLatest.value = true;
-        }
+            if (isNearBottom.value) {
+                nextTick(() => {
+                    scrollToBottom();
+                });
+            } else {
+                showJumpToLatest.value = true;
+            }
+        },
+
+        "message.status.updated": (event) => {
+            const updatedMessage = event.message;
+
+            if (!updatedMessage) {
+                return;
+            }
+
+            if (
+                Number(updatedMessage.customer_id) !== Number(props.customer.id)
+            ) {
+                return;
+            }
+
+            const index = messageList.value.findIndex(
+                (item) => Number(item.id) === Number(updatedMessage.id),
+            );
+
+            if (index === -1) {
+                return;
+            }
+
+            messageList.value[index] = normalizeMessage(updatedMessage);
+
+            if (updatedMessage.status === "failed") {
+                error(
+                    updatedMessage.failure_reason ||
+                        "WhatsApp delivery failed.",
+                );
+            }
+        },
+
+        "message.received": (event) => {
+            const message = event.message;
+
+            if (!message) {
+                return;
+            }
+
+            if (Number(message.customer_id) !== Number(props.customer.id)) {
+                return;
+            }
+
+            if (message.type === "reaction") {
+                handleRealtimeReaction(message);
+                markConversationRead();
+
+                return;
+            }
+
+            if (messageExists(message.id)) {
+                return;
+            }
+
+            if (activeSearch.value || loadingAroundDate.value) {
+                return;
+            }
+
+            messageList.value.push(normalizeMessage(message));
+
+            sortMessages();
+
+            if (message.direction === "inbound") {
+                markConversationRead();
+            }
+
+            if (isNearBottom.value) {
+                nextTick(() => {
+                    scrollToBottom();
+                });
+            } else {
+                showJumpToLatest.value = true;
+            }
+        },
     },
-
-    "message.status.updated": (event) => {
-        const updatedMessage = event.message;
-
-        if (!updatedMessage) {
-            return;
-        }
-
-        if (Number(updatedMessage.customer_id) !== Number(props.customer.id)) {
-            return;
-        }
-
-        const index = messageList.value.findIndex(
-            (item) => Number(item.id) === Number(updatedMessage.id),
-        );
-
-        if (index === -1) {
-            return;
-        }
-
-        messageList.value[index] = normalizeMessage(updatedMessage);
-
-        if (updatedMessage.status === "failed") {
-            error(updatedMessage.failure_reason || "WhatsApp delivery failed.");
-        }
-    },
-
-    "message.received": (event) => {
-        const message = event.message;
-
-        if (!message) {
-            return;
-        }
-
-        if (Number(message.customer_id) !== Number(props.customer.id)) {
-            return;
-        }
-
-        if (message.type === "reaction") {
-            handleRealtimeReaction(message);
-            markConversationRead();
-
-            return;
-        }
-
-        if (messageExists(message.id)) {
-            return;
-        }
-
-        if (activeSearch.value || loadingAroundDate.value) {
-            return;
-        }
-
-        messageList.value.push(normalizeMessage(message));
-
-        sortMessages();
-
-        if (message.direction === "inbound") {
-            markConversationRead();
-        }
-
-        if (isNearBottom.value) {
-            nextTick(() => {
-                scrollToBottom();
-            });
-        } else {
-            showJumpToLatest.value = true;
-        }
-    },
-});
+);
 
 /*
 |--------------------------------------------------------------------------
@@ -1671,1262 +1707,1361 @@ const messageBorderClass = (message) => {
             <main
                 class="flex-1 min-w-0 min-h-0 overflow-y-auto hide-scrollbar flex flex-col bg-surface-50"
             >
-            <!-- ========================================================= -->
-            <!-- HEADER -->
-            <!-- ========================================================= -->
-
-            <div
-                class="bg-white border border-surface-200 rounded-xl shadow-sm shrink-0"
-            >
-                <div class="px-5 py-4 flex items-center justify-between gap-4">
-                    <div class="flex items-center gap-3 min-w-0">
-                        <Link
-                            :href="route('team-admin.messages.index')"
-                            class="w-9 h-9 rounded-lg border border-surface-200 flex items-center justify-center text-surface-500 hover:bg-surface-50"
-                        >
-                            <ArrowLeft class="w-4 h-4" />
-                        </Link>
-
-                        <div
-                            class="w-10 h-10 rounded-full bg-surface-100 flex items-center justify-center shrink-0"
-                        >
-                            <User class="w-5 h-5 text-surface-500" />
-                        </div>
-
-                        <div class="min-w-0">
-                            <h1
-                                class="text-sm font-semibold text-surface-900 truncate"
-                            >
-                                {{ customer.name }} - #{{ customer.bitrix_lead_id }}
-                            </h1>
-
-                            <p class="text-xs text-surface-500 mt-0.5">
-                                {{ customerPhone }}
-                            </p>
-                        </div>
-                    </div>
-
-                    <div class="hidden md:block text-right shrink-0">
-                        <p class="text-xs text-surface-500">Workspace</p>
-
-                        <p class="text-xs font-medium text-surface-800">
-                            {{ customerTeam }}
-                        </p>
-                    </div>
-                </div>
-
-                <!-- Conversation Window -->
+                <!-- ========================================================= -->
+                <!-- HEADER -->
+                <!-- ========================================================= -->
 
                 <div
-                    class="px-5 py-3 border-t border-surface-100"
-                    :class="windowOpen ? 'bg-emerald-50' : 'bg-amber-50'"
+                    class="bg-white border border-surface-200 rounded-xl shadow-sm shrink-0"
                 >
-                    <div class="flex items-center justify-between gap-3">
-                        <div class="flex items-center gap-2">
-                            <Clock
-                                class="w-4 h-4"
-                                :class="
-                                    windowOpen
-                                        ? 'text-emerald-600'
-                                        : 'text-amber-600'
-                                "
-                            />
+                    <div
+                        class="px-5 py-4 flex items-center justify-between gap-4"
+                    >
+                        <div class="flex items-center gap-3 min-w-0">
+                            <Link
+                                :href="route('team-admin.messages.index')"
+                                class="w-9 h-9 rounded-lg border border-surface-200 flex items-center justify-center text-surface-500 hover:bg-surface-50"
+                            >
+                                <ArrowLeft class="w-4 h-4" />
+                            </Link>
 
-                            <div>
-                                <p
-                                    class="text-xs font-semibold"
-                                    :class="
-                                        windowOpen
-                                            ? 'text-emerald-800'
-                                            : 'text-amber-800'
-                                    "
+                            <div
+                                class="w-10 h-10 rounded-full bg-surface-100 flex items-center justify-center shrink-0"
+                            >
+                                <User class="w-5 h-5 text-surface-500" />
+                            </div>
+
+                            <div class="min-w-0">
+                                <h1
+                                    class="text-sm font-semibold text-surface-900 truncate"
                                 >
-                                    {{
-                                        windowOpen
-                                            ? "24-hour messaging window is open"
-                                            : "24-hour messaging window is closed"
+                                    {{ customer.name }} - #{{
+                                        customer.bitrix_lead_id
                                     }}
-                                </p>
+                                </h1>
 
-                                <p
-                                    class="text-[11px] mt-0.5"
-                                    :class="
-                                        windowOpen
-                                            ? 'text-emerald-700'
-                                            : 'text-amber-700'
-                                    "
-                                >
-                                    <template v-if="windowOpen">
-                                        You can send text, images, documents and
-                                        other normal messages.
-                                    </template>
-
-                                    <template v-else>
-                                        A WhatsApp template is required to start
-                                        or reopen this conversation.
-                                    </template>
+                                <p class="text-xs text-surface-500 mt-0.5">
+                                    {{ customerPhone }}
                                 </p>
                             </div>
                         </div>
 
-                        <span
-                            v-if="remainingTime"
-                            class="text-xs font-medium text-emerald-700"
+                        <div class="hidden md:block text-right shrink-0">
+                            <p class="text-xs text-surface-500">Workspace</p>
+
+                            <p class="text-xs font-medium text-surface-800">
+                                {{ customerTeam }}
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Conversation Window -->
+
+                    <div
+                        class="px-5 py-3 border-t border-surface-100"
+                        :class="windowOpen ? 'bg-emerald-50' : 'bg-amber-50'"
+                    >
+                        <div class="flex items-center justify-between gap-3">
+                            <div class="flex items-center gap-2">
+                                <Clock
+                                    class="w-4 h-4"
+                                    :class="
+                                        windowOpen
+                                            ? 'text-emerald-600'
+                                            : 'text-amber-600'
+                                    "
+                                />
+
+                                <div>
+                                    <p
+                                        class="text-xs font-semibold"
+                                        :class="
+                                            windowOpen
+                                                ? 'text-emerald-800'
+                                                : 'text-amber-800'
+                                        "
+                                    >
+                                        {{
+                                            windowOpen
+                                                ? "24-hour messaging window is open"
+                                                : "24-hour messaging window is closed"
+                                        }}
+                                    </p>
+
+                                    <p
+                                        class="text-[11px] mt-0.5"
+                                        :class="
+                                            windowOpen
+                                                ? 'text-emerald-700'
+                                                : 'text-amber-700'
+                                        "
+                                    >
+                                        <template v-if="windowOpen">
+                                            You can send text, images, documents
+                                            and other normal messages.
+                                        </template>
+
+                                        <template v-else>
+                                            A WhatsApp template is required to
+                                            start or reopen this conversation.
+                                        </template>
+                                    </p>
+                                </div>
+                            </div>
+
+                            <span
+                                v-if="remainingTime"
+                                class="text-xs font-medium text-emerald-700"
+                            >
+                                {{ remainingTime }}
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- SEARCH / DATE TOOLBAR -->
+
+                    <div
+                        class="px-4 py-2.5 border-t border-surface-100 flex flex-wrap items-center gap-2"
+                    >
+                        <div class="relative flex-1 min-w-[220px]">
+                            <Search
+                                class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400"
+                            />
+
+                            <input
+                                v-model="searchText"
+                                type="text"
+                                placeholder="Search messages..."
+                                class="w-full h-9 pl-9 pr-9 rounded-lg border border-surface-200 text-xs focus:border-slate-400 focus:ring-0"
+                                @input="scheduleSearch"
+                                @keydown.enter="performSearch"
+                            />
+
+                            <button
+                                v-if="searchText"
+                                type="button"
+                                @click="clearSearch"
+                                class="absolute right-2 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-700"
+                            >
+                                <X class="w-4 h-4" />
+                            </button>
+
+                            <LoaderCircle
+                                v-if="searchLoading"
+                                class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-surface-400"
+                            />
+                        </div>
+
+                        <div class="relative">
+                            <button
+                                type="button"
+                                @click="showDatePicker = !showDatePicker"
+                                class="h-9 px-3 rounded-lg border border-surface-200 text-xs font-medium text-surface-600 hover:bg-surface-50 inline-flex items-center gap-2"
+                            >
+                                <Calendar class="w-4 h-4" />
+
+                                Jump to date
+                            </button>
+
+                            <div
+                                v-if="showDatePicker"
+                                class="absolute z-30 right-0 top-11 bg-white border border-surface-200 rounded-xl shadow-xl p-3 w-64"
+                            >
+                                <p
+                                    class="text-xs font-semibold text-surface-800 mb-2"
+                                >
+                                    Jump to date
+                                </p>
+
+                                <input
+                                    v-model="jumpDate"
+                                    type="date"
+                                    class="w-full rounded-lg border border-surface-200 text-sm focus:ring-0 focus:border-slate-400"
+                                    @keydown.enter="jumpToDate"
+                                />
+
+                                <div class="flex justify-end gap-2 mt-3">
+                                    <button
+                                        type="button"
+                                        @click="showDatePicker = false"
+                                        class="px-3 py-1.5 rounded-lg text-xs text-surface-600 hover:bg-surface-50"
+                                    >
+                                        Cancel
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        @click="jumpToDate"
+                                        :disabled="
+                                            !jumpDate || loadingAroundDate
+                                        "
+                                        class="px-3 py-1.5 rounded-lg bg-slate-700 text-white text-xs font-medium disabled:opacity-50"
+                                    >
+                                        {{
+                                            loadingAroundDate
+                                                ? "Loading..."
+                                                : "Go"
+                                        }}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div
+                            v-if="activeSearch"
+                            class="text-[11px] text-surface-500"
                         >
-                            {{ remainingTime }}
-                        </span>
+                            {{ searchResults.length }}
+                            result{{ searchResults.length === 1 ? "" : "s" }}
+                        </div>
                     </div>
                 </div>
 
-                <!-- SEARCH / DATE TOOLBAR -->
+                <!-- ========================================================= -->
+                <!-- CONVERSATION -->
+                <!-- ========================================================= -->
 
                 <div
-                    class="px-4 py-2.5 border-t border-surface-100 flex flex-wrap items-center gap-2"
+                    ref="messagesContainer"
+                    class="relative flex-1 min-h-[60vh] thin-green-scrollbar overflow-y-auto px-2 sm:px-4 py-5 space-y-3"
                 >
-                    <div class="relative flex-1 min-w-[220px]">
-                        <Search
-                            class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400"
-                        />
-
-                        <input
-                            v-model="searchText"
-                            type="text"
-                            placeholder="Search messages..."
-                            class="w-full h-9 pl-9 pr-9 rounded-lg border border-surface-200 text-xs focus:border-slate-400 focus:ring-0"
-                            @input="scheduleSearch"
-                            @keydown.enter="performSearch"
-                        />
-
-                        <button
-                            v-if="searchText"
-                            type="button"
-                            @click="clearSearch"
-                            class="absolute right-2 top-1/2 -translate-y-1/2 text-surface-400 hover:text-surface-700"
+                    <div
+                        v-if="loadingOlderMessages"
+                        class="sticky top-0 z-20 flex justify-center pointer-events-none"
+                    >
+                        <div
+                            class="bg-white border border-surface-200 shadow-sm rounded-full px-3 py-1.5 flex items-center gap-2 text-[11px] text-surface-500"
                         >
-                            <X class="w-4 h-4" />
-                        </button>
+                            <LoaderCircle class="w-3.5 h-3.5 animate-spin" />
 
-                        <LoaderCircle
-                            v-if="searchLoading"
-                            class="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-surface-400"
-                        />
+                            Loading older messages...
+                        </div>
                     </div>
 
-                    <div class="relative">
-                        <button
-                            type="button"
-                            @click="showDatePicker = !showDatePicker"
-                            class="h-9 px-3 rounded-lg border border-surface-200 text-xs font-medium text-surface-600 hover:bg-surface-50 inline-flex items-center gap-2"
-                        >
-                            <Calendar class="w-4 h-4" />
-
-                            Jump to date
-                        </button>
-
+                    <div
+                        v-if="activeSearch"
+                        class="sticky top-0 z-10 flex justify-center pointer-events-none"
+                    >
                         <div
-                            v-if="showDatePicker"
-                            class="absolute z-30 right-0 top-11 bg-white border border-surface-200 rounded-xl shadow-xl p-3 w-64"
+                            class="bg-slate-800 text-white rounded-full px-3 py-1 text-[10px] shadow-sm"
                         >
-                            <p
-                                class="text-xs font-semibold text-surface-800 mb-2"
+                            Search results for "{{ activeSearch }}"
+                        </div>
+                    </div>
+
+                    <div
+                        v-if="!messageList.length"
+                        class="h-full flex items-center justify-center"
+                    >
+                        <div class="text-center">
+                            <div
+                                class="w-12 h-12 rounded-full bg-surface-100 flex items-center justify-center mx-auto"
                             >
-                                Jump to date
+                                <Search
+                                    v-if="activeSearch"
+                                    class="w-5 h-5 text-surface-400"
+                                />
+
+                                <User v-else class="w-5 h-5 text-surface-400" />
+                            </div>
+
+                            <p
+                                class="text-sm font-medium text-surface-700 mt-3"
+                            >
+                                {{
+                                    activeSearch
+                                        ? "No messages found"
+                                        : "No messages yet"
+                                }}
                             </p>
 
-                            <input
-                                v-model="jumpDate"
-                                type="date"
-                                class="w-full rounded-lg border border-surface-200 text-sm focus:ring-0 focus:border-slate-400"
-                                @keydown.enter="jumpToDate"
-                            />
+                            <p class="text-xs text-surface-500 mt-1">
+                                {{
+                                    activeSearch
+                                        ? "Try another search term."
+                                        : "Start the conversation using an approved template."
+                                }}
+                            </p>
+                        </div>
+                    </div>
 
-                            <div class="flex justify-end gap-2 mt-3">
+                    <template
+                        v-for="(message, index) in messageList"
+                        :key="message.id"
+                    >
+                        <div
+                            v-if="shouldShowDateSeparator(index)"
+                            class="flex items-center justify-center py-2"
+                        >
+                            <span
+                                class="bg-surface-100 text-surface-500 text-[10px] font-medium px-3 py-1 rounded-full"
+                            >
+                                {{ formatFullDate(message.created_at) }}
+                            </span>
+                        </div>
+
+                        <div
+                            :data-message-id="message.id"
+                            class="flex"
+                            :class="
+                                message.direction === 'outbound'
+                                    ? 'justify-end'
+                                    : 'justify-start'
+                            "
+                        >
+                            <div
+                                class="group relative rounded-2xl px-4 py-2.5 border-2 shadow-[0_1px_1px_rgba(0,0,0,0.04)]"
+                                :class="[
+                                    message.document
+                                        ? 'w-[40%]'
+                                        : 'max-w-[60%]',
+                                    message.direction === 'outbound'
+                                        ? 'bg-[#dffcd9] text-black rounded-br-md'
+                                        : 'bg-white text-surface-900 rounded-bl-md',
+                                    messageBorderClass(message),
+                                ]"
+                            >
+                                <!-- Media -->
+
+                                <div
+                                    v-if="
+                                        message.type &&
+                                        message.type !== 'text' &&
+                                        message.type !== 'chat' &&
+                                        message.document
+                                    "
+                                    class="mb-2"
+                                >
+                                    <div
+                                        v-if="message.type === 'image'"
+                                        class="overflow-hidden rounded-xl bg-black/5"
+                                    >
+                                        <img
+                                            :src="message.document.url"
+                                            :alt="
+                                                message.document
+                                                    .original_filename ||
+                                                'Image'
+                                            "
+                                            class="max-w-full max-h-80 object-contain cursor-pointer mx-auto"
+                                            @click="
+                                                window.open(
+                                                    message.document.url,
+                                                    '_blank',
+                                                )
+                                            "
+                                        />
+
+                                        <div
+                                            class="flex items-center justify-end gap-2 px-2 py-2"
+                                        >
+                                            <a
+                                                :href="message.document.url"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                class="text-xs font-medium hover:underline"
+                                            >
+                                                View
+                                            </a>
+
+                                            <a
+                                                :href="message.document.url"
+                                                :download="
+                                                    message.document
+                                                        .original_filename ||
+                                                    message.document
+                                                        .stored_filename
+                                                "
+                                                class="text-xs font-medium hover:underline"
+                                            >
+                                                Download
+                                            </a>
+                                        </div>
+                                    </div>
+
+                                    <div
+                                        v-else-if="message.type === 'video'"
+                                        class="overflow-hidden rounded-xl bg-black"
+                                    >
+                                        <video
+                                            :src="message.document.url"
+                                            controls
+                                            class="max-w-full max-h-80"
+                                        />
+                                    </div>
+
+                                    <div
+                                        v-else-if="message.type === 'audio'"
+                                        class="rounded-xl p-3 bg-surface-50"
+                                    >
+                                        <audio
+                                            :src="message.document.url"
+                                            controls
+                                            class="w-full"
+                                        />
+                                    </div>
+
+                                    <div
+                                        v-else
+                                        class="rounded-xl border p-3 min-w-[220px] border-surface-200 bg-surface-50"
+                                    >
+                                        <div class="flex items-center gap-3">
+                                            <div
+                                                class="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 bg-white"
+                                            >
+                                                <FileText class="w-5 h-5" />
+                                            </div>
+
+                                            <div class="min-w-0 flex-1">
+                                                <p
+                                                    class="text-xs font-medium truncate"
+                                                >
+                                                    {{
+                                                        message.document
+                                                            .original_filename ||
+                                                        message.document
+                                                            .stored_filename ||
+                                                        "Document"
+                                                    }}
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        <div
+                                            class="flex justify-end gap-3 mt-3"
+                                        >
+                                            <a
+                                                :href="message.document.url"
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                class="text-xs font-medium hover:underline"
+                                            >
+                                                View
+                                            </a>
+
+                                            <a
+                                                :href="message.document.url"
+                                                :download="
+                                                    message.document
+                                                        .original_filename ||
+                                                    message.document
+                                                        .stored_filename
+                                                "
+                                                class="text-xs font-medium hover:underline"
+                                            >
+                                                Download
+                                            </a>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Body -->
+
+                                <p
+                                    v-if="message.body"
+                                    class="text-sm whitespace-pre-wrap break-words"
+                                    v-html="
+                                        activeSearch
+                                            ? highlightSearchText(message.body)
+                                            : message.body
+                                    "
+                                />
+
+                                <!-- Meta -->
+
+                                <div
+                                    class="flex items-center justify-end gap-1 mt-1 text-surface-400"
+                                >
+                                    <span class="text-[10px]">
+                                        {{ formatTime(message.created_at) }}
+                                    </span>
+
+                                    <Check
+                                        v-if="
+                                            messageStatusIcon(message) ===
+                                            'pending'
+                                        "
+                                        class="w-3 h-3"
+                                    />
+
+                                    <CheckCheck
+                                        v-if="
+                                            messageStatusIcon(message) ===
+                                            'delivered'
+                                        "
+                                        class="w-3 h-3"
+                                    />
+
+                                    <CheckCheck
+                                        v-if="
+                                            messageStatusIcon(message) ===
+                                            'read'
+                                        "
+                                        class="w-4 h-4 text-[#4FB6EC]"
+                                    />
+
+                                    <X
+                                        v-if="
+                                            messageStatusIcon(message) ===
+                                            'failed'
+                                        "
+                                        class="w-3 h-3 text-red-500"
+                                    />
+                                </div>
+
+                                <div
+                                    v-if="
+                                        message.direction === 'outbound' &&
+                                        message.sender_context?.name
+                                    "
+                                    class="absolute top-full right-0 mt-1 z-30 whitespace-nowrap px-2.5 py-1 rounded-md bg-surface-900 text-white text-[10px] font-medium shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 pointer-events-none"
+                                >
+                                    {{ message.sender_context.name }}
+                                    ·
+                                    {{ message.sender_context.role }}
+                                </div>
+
+                                <div
+                                    v-if="
+                                        Array.isArray(message.reactions) &&
+                                        message.reactions.length
+                                    "
+                                    class="flex flex-wrap gap-1 -mt-1 px-2"
+                                    :class="
+                                        message.direction === 'outbound'
+                                            ? 'justify-end'
+                                            : 'justify-start'
+                                    "
+                                >
+                                    <div
+                                        v-for="reaction in message.reactions"
+                                        :key="reaction.id"
+                                        class="inline-flex items-center rounded-full px-1.5 py-0.5 shadow-sm"
+                                    >
+                                        <span
+                                            class="text-base leading-none"
+                                            :title="reaction.body"
+                                        >
+                                            {{ reaction.body }}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <button
+                        v-if="showJumpToLatest"
+                        type="button"
+                        @click="scrollToBottom()"
+                        class="sticky bottom-4 left-1/2 -translate-x-1/2 z-20 mx-auto flex items-center gap-2 bg-slate-800 text-white rounded-full px-4 py-2 text-xs font-medium shadow-lg hover:bg-slate-900"
+                    >
+                        <ArrowDown class="w-3.5 h-3.5" />
+
+                        Jump to latest
+                    </button>
+                </div>
+
+                <!-- ========================================================= -->
+                <!-- COMPOSER -->
+                <!-- ========================================================= -->
+
+                <div
+                    class="bg-white border border-surface-200 rounded-xl shadow-sm shrink-0"
+                >
+                    <!-- ===================================================== -->
+                    <!-- TEMPLATE SELECTOR -->
+                    <!-- ===================================================== -->
+
+                    <div v-if="composerMode === 'template'" class="p-4">
+                        <div
+                            class="flex items-center justify-between gap-3 mb-3"
+                        >
+                            <div class="flex items-center gap-2">
+                                <div
+                                    class="w-8 h-8 rounded-lg bg-surface-100 flex items-center justify-center"
+                                >
+                                    <FileText
+                                        class="w-4 h-4 text-surface-600"
+                                    />
+                                </div>
+
+                                <div>
+                                    <p
+                                        class="text-sm font-semibold text-surface-900"
+                                    >
+                                        Send WhatsApp Template
+                                    </p>
+
+                                    <p class="text-xs text-surface-500 mt-0.5">
+                                        Select a template and preview it before
+                                        sending.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <button
+                                v-if="windowOpen"
+                                type="button"
+                                @click="openNormalComposer"
+                                :disabled="sending"
+                                class="text-xs font-medium text-surface-600 hover:text-surface-900"
+                            >
+                                ← Normal message
+                            </button>
+                        </div>
+
+                        <div
+                            v-if="!templates.length"
+                            class="rounded-lg border border-amber-200 bg-amber-50 p-3"
+                        >
+                            <p class="text-xs font-medium text-amber-800">
+                                No approved WhatsApp templates are available.
+                            </p>
+
+                            <p class="text-[11px] text-amber-700 mt-1">
+                                Please ask your administrator to configure an
+                                approved template for this WhatsApp number.
+                            </p>
+                        </div>
+
+                        <div v-else class="space-y-3">
+                            <select
+                                v-model="selectedTemplate"
+                                :disabled="sending"
+                                class="w-full rounded-lg border border-surface-200 text-sm focus:border-surface-400 focus:ring-0"
+                            >
+                                <option :value="null">Select template</option>
+
+                                <option
+                                    v-for="template in templates"
+                                    :key="template.id"
+                                    :value="template.id"
+                                >
+                                    {{ template.name }}
+                                    —
+                                    {{ template.language }}
+                                </option>
+                            </select>
+
+                            <!-- Selected template -->
+
+                            <div
+                                v-if="selectedTemplateObject"
+                                class="rounded-lg border border-surface-200 bg-surface-50 p-3"
+                            >
+                                <div
+                                    class="flex items-start justify-between gap-3"
+                                >
+                                    <div class="min-w-0">
+                                        <p
+                                            class="text-xs font-semibold text-surface-800"
+                                        >
+                                            {{ selectedTemplateObject.name }}
+                                        </p>
+
+                                        <p
+                                            class="text-[10px] text-surface-500 mt-0.5"
+                                        >
+                                            {{
+                                                selectedTemplateObject.language
+                                            }}
+
+                                            <span
+                                                v-if="
+                                                    selectedTemplateObject.category
+                                                "
+                                            >
+                                                ·
+                                                {{
+                                                    selectedTemplateObject.category
+                                                }}
+                                            </span>
+                                        </p>
+                                    </div>
+
+                                    <span
+                                        class="shrink-0 text-[10px] font-medium px-2 py-1 rounded-full bg-emerald-100 text-emerald-700"
+                                    >
+                                        APPROVED
+                                    </span>
+                                </div>
+
+                                <div class="flex flex-wrap gap-2 mt-3">
+                                    <span
+                                        v-if="hasTemplateBodyVariables"
+                                        class="text-[10px] px-2 py-1 rounded-md bg-white border border-surface-200 text-surface-600"
+                                    >
+                                        {{ templateBodyVariables.length }}
+                                        body variable{{
+                                            templateBodyVariables.length === 1
+                                                ? ""
+                                                : "s"
+                                        }}
+                                    </span>
+
+                                    <span
+                                        v-if="hasTemplateHeaderVariables"
+                                        class="text-[10px] px-2 py-1 rounded-md bg-white border border-surface-200 text-surface-600"
+                                    >
+                                        Header variable
+                                    </span>
+
+                                    <span
+                                        v-if="hasTemplateHeaderMedia"
+                                        class="text-[10px] px-2 py-1 rounded-md bg-white border border-surface-200 text-surface-600"
+                                    >
+                                        {{ templateHeaderFormat }}
+                                        header
+                                    </span>
+
+                                    <span
+                                        v-if="hasTemplateButtonVariables"
+                                        class="text-[10px] px-2 py-1 rounded-md bg-white border border-surface-200 text-surface-600"
+                                    >
+                                        Button variable
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div class="flex items-center justify-end gap-2">
                                 <button
+                                    v-if="windowOpen"
                                     type="button"
-                                    @click="showDatePicker = false"
-                                    class="px-3 py-1.5 rounded-lg text-xs text-surface-600 hover:bg-surface-50"
+                                    @click="openNormalComposer"
+                                    :disabled="sending"
+                                    class="px-4 py-2 rounded-lg border border-surface-200 text-sm font-medium text-surface-700 hover:bg-surface-50 disabled:opacity-50"
                                 >
                                     Cancel
                                 </button>
 
                                 <button
                                     type="button"
-                                    @click="jumpToDate"
-                                    :disabled="!jumpDate || loadingAroundDate"
-                                    class="px-3 py-1.5 rounded-lg bg-slate-700 text-white text-xs font-medium disabled:opacity-50"
+                                    @click="openTemplatePreview"
+                                    :disabled="!selectedTemplate || sending"
+                                    class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-700 text-white text-sm font-medium hover:bg-slate-900 disabled:opacity-50"
                                 >
-                                    {{
-                                        loadingAroundDate ? "Loading..." : "Go"
-                                    }}
+                                    <FileText class="w-4 h-4" />
+
+                                    Preview Template
                                 </button>
                             </div>
                         </div>
-                    </div>
 
-                    <div
-                        v-if="activeSearch"
-                        class="text-[11px] text-surface-500"
-                    >
-                        {{ searchResults.length }}
-                        result{{ searchResults.length === 1 ? "" : "s" }}
-                    </div>
-                </div>
-            </div>
-
-            <!-- ========================================================= -->
-            <!-- CONVERSATION -->
-            <!-- ========================================================= -->
-
-            <div
-                ref="messagesContainer"
-                class="relative flex-1 min-h-[60vh] thin-green-scrollbar overflow-y-auto px-2 sm:px-4 py-5 space-y-3"
-            >
-                <div
-                    v-if="loadingOlderMessages"
-                    class="sticky top-0 z-20 flex justify-center pointer-events-none"
-                >
-                    <div
-                        class="bg-white border border-surface-200 shadow-sm rounded-full px-3 py-1.5 flex items-center gap-2 text-[11px] text-surface-500"
-                    >
-                        <LoaderCircle class="w-3.5 h-3.5 animate-spin" />
-
-                        Loading older messages...
-                    </div>
-                </div>
-
-                <div
-                    v-if="activeSearch"
-                    class="sticky top-0 z-10 flex justify-center pointer-events-none"
-                >
-                    <div
-                        class="bg-slate-800 text-white rounded-full px-3 py-1 text-[10px] shadow-sm"
-                    >
-                        Search results for "{{ activeSearch }}"
-                    </div>
-                </div>
-
-                <div
-                    v-if="!messageList.length"
-                    class="h-full flex items-center justify-center"
-                >
-                    <div class="text-center">
-                        <div
-                            class="w-12 h-12 rounded-full bg-surface-100 flex items-center justify-center mx-auto"
+                        <p
+                            v-if="!windowOpen"
+                            class="text-[10px] text-amber-600 mt-3"
                         >
-                            <Search
-                                v-if="activeSearch"
-                                class="w-5 h-5 text-surface-400"
-                            />
-
-                            <User v-else class="w-5 h-5 text-surface-400" />
-                        </div>
-
-                        <p class="text-sm font-medium text-surface-700 mt-3">
-                            {{
-                                activeSearch
-                                    ? "No messages found"
-                                    : "No messages yet"
-                            }}
-                        </p>
-
-                        <p class="text-xs text-surface-500 mt-1">
-                            {{
-                                activeSearch
-                                    ? "Try another search term."
-                                    : "Start the conversation using an approved template."
-                            }}
+                            The 24-hour messaging window is closed. A template
+                            is required to start or reopen the conversation.
                         </p>
                     </div>
-                </div>
 
-                <template
-                    v-for="(message, index) in messageList"
-                    :key="message.id"
-                >
-                    <div
-                        v-if="shouldShowDateSeparator(index)"
-                        class="flex items-center justify-center py-2"
-                    >
-                        <span
-                            class="bg-surface-100 text-surface-500 text-[10px] font-medium px-3 py-1 rounded-full"
-                        >
-                            {{ formatFullDate(message.created_at) }}
-                        </span>
-                    </div>
+                    <!-- ===================================================== -->
+                    <!-- TEMPLATE PREVIEW -->
+                    <!-- ===================================================== -->
 
                     <div
-                        :data-message-id="message.id"
-                        class="flex"
-                        :class="
-                            message.direction === 'outbound'
-                                ? 'justify-end'
-                                : 'justify-start'
-                        "
+                        v-if="templatePreviewOpen"
+                        class="border-t border-surface-100 bg-surface-50"
                     >
-                        <div
-                            class="group relative rounded-2xl px-4 py-2.5 border-2 shadow-[0_1px_1px_rgba(0,0,0,0.04)]"
-                            :class="[
-                                message.document ? 'w-[40%]' : 'max-w-[60%]',
-                                message.direction === 'outbound'
-                                ? 'bg-[#dffcd9] text-black rounded-br-md'
-                                : 'bg-white text-surface-900 rounded-bl-md',
-                                messageBorderClass(message),
-                            ]"
-                        >
-                            <!-- Media -->
-
+                        <div class="p-4">
                             <div
-                                v-if="
-                                    message.type &&
-                                    message.type !== 'text' &&
-                                    message.type !== 'chat' &&
-                                    message.document
-                                "
-                                class="mb-2"
+                                class="flex items-center justify-between gap-3 mb-4"
                             >
-                                <div
-                                    v-if="message.type === 'image'"
-                                    class="overflow-hidden rounded-xl bg-black/5"
+                                <div>
+                                    <p
+                                        class="text-sm font-semibold text-surface-900"
+                                    >
+                                        Preview Template
+                                    </p>
+
+                                    <p class="text-xs text-surface-500 mt-0.5">
+                                        Review the message, variables and media
+                                        before sending.
+                                    </p>
+                                </div>
+
+                                <button
+                                    type="button"
+                                    @click="closeTemplatePreview"
+                                    :disabled="sending"
+                                    class="w-8 h-8 rounded-lg border border-surface-200 bg-white flex items-center justify-center text-surface-500 hover:text-surface-900 disabled:opacity-50"
                                 >
-                                    <img
-                                        :src="message.document.url"
-                                        :alt="
-                                            message.document
-                                                .original_filename || 'Image'
-                                        "
-                                        class="max-w-full max-h-80 object-contain cursor-pointer mx-auto"
-                                        @click="
-                                            window.open(
-                                                message.document.url,
-                                                '_blank',
-                                            )
-                                        "
-                                    />
+                                    <X class="w-4 h-4" />
+                                </button>
+                            </div>
+
+                            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                <!-- Variables -->
+
+                                <div class="space-y-3">
+                                    <!-- Body -->
 
                                     <div
-                                        class="flex items-center justify-end gap-2 px-2 py-2"
+                                        v-if="hasTemplateBodyVariables"
+                                        class="rounded-xl border border-surface-200 bg-white p-4"
                                     >
-                                        <a
-                                            :href="message.document.url"
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            class="text-xs font-medium hover:underline"
+                                        <p
+                                            class="text-xs font-semibold text-surface-800 mb-3"
                                         >
-                                            View
-                                        </a>
+                                            Body variables
+                                        </p>
 
-                                        <a
-                                            :href="message.document.url"
-                                            :download="
-                                                message.document
-                                                    .original_filename ||
-                                                message.document.stored_filename
-                                            "
-                                            class="text-xs font-medium hover:underline"
-                                        >
-                                            Download
-                                        </a>
-                                    </div>
-                                </div>
-
-                                <div
-                                    v-else-if="message.type === 'video'"
-                                    class="overflow-hidden rounded-xl bg-black"
-                                >
-                                    <video
-                                        :src="message.document.url"
-                                        controls
-                                        class="max-w-full max-h-80"
-                                    />
-                                </div>
-
-                                <div
-                                    v-else-if="message.type === 'audio'"
-                                    class="rounded-xl p-3 bg-surface-50"
-                                >
-                                    <audio
-                                        :src="message.document.url"
-                                        controls
-                                        class="w-full"
-                                    />
-                                </div>
-
-                                <div
-                                    v-else
-                                    class="rounded-xl border p-3 min-w-[220px] border-surface-200 bg-surface-50"
-                                >
-                                    <div class="flex items-center gap-3">
-                                        <div
-                                            class="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 bg-white"
-                                        >
-                                            <FileText class="w-5 h-5" />
-                                        </div>
-
-                                        <div class="min-w-0 flex-1">
-                                            <p
-                                                class="text-xs font-medium truncate"
+                                        <div class="space-y-3">
+                                            <div
+                                                v-for="(
+                                                    value, index
+                                                ) in templateBodyVariables"
+                                                :key="`body-${index}`"
                                             >
-                                                {{
-                                                    message.document
-                                                        .original_filename ||
-                                                    message.document
-                                                        .stored_filename ||
-                                                    "Document"
-                                                }}
-                                            </p>
+                                                <label
+                                                    class="block text-[11px] font-medium text-surface-600 mb-1"
+                                                >
+                                                    Body variable
+                                                    {{ index + 1 }}
+                                                </label>
+
+                                                <input
+                                                    v-model="
+                                                        templateBodyVariables[
+                                                            index
+                                                        ]
+                                                    "
+                                                    type="text"
+                                                    maxlength="1000"
+                                                    :placeholder="`Value for {{${index + 1}}}`"
+                                                    class="w-full rounded-lg border border-surface-200 text-sm focus:border-surface-400 focus:ring-0"
+                                                />
+                                            </div>
                                         </div>
                                     </div>
 
-                                    <div class="flex justify-end gap-3 mt-3">
-                                        <a
-                                            :href="message.document.url"
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            class="text-xs font-medium hover:underline"
-                                        >
-                                            View
-                                        </a>
+                                    <!-- Header text -->
 
-                                        <a
-                                            :href="message.document.url"
-                                            :download="
-                                                message.document
-                                                    .original_filename ||
-                                                message.document.stored_filename
-                                            "
-                                            class="text-xs font-medium hover:underline"
-                                        >
-                                            Download
-                                        </a>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Body -->
-
-                            <p
-                                v-if="message.body"
-                                class="text-sm whitespace-pre-wrap break-words"
-                                v-html="
-                                    activeSearch
-                                        ? highlightSearchText(message.body)
-                                        : message.body
-                                "
-                            />
-
-                            <!-- Meta -->
-
-                            <div
-                                class="flex items-center justify-end gap-1 mt-1 text-surface-400"
-                            >
-                                <span class="text-[10px]">
-                                    {{ formatTime(message.created_at) }}
-                                </span>
-
-                                <Check
-                                    v-if="
-                                        messageStatusIcon(message) === 'pending'
-                                    "
-                                    class="w-3 h-3"
-                                />
-
-                                <CheckCheck
-                                    v-if="
-                                        messageStatusIcon(message) ===
-                                        'delivered'
-                                    "
-                                    class="w-3 h-3"
-                                />
-
-                                <CheckCheck
-                                    v-if="messageStatusIcon(message) === 'read'"
-                                    class="w-4 h-4 text-[#4FB6EC]"
-                                />
-
-                                <X
-                                    v-if="
-                                        messageStatusIcon(message) === 'failed'
-                                    "
-                                    class="w-3 h-3 text-red-500"
-                                />
-                            </div>
-
-                            <div
-                                v-if="
-                                    message.direction === 'outbound' &&
-                                    message.sender_context?.name
-                                "
-                                class="absolute top-full right-0 mt-1 z-30 whitespace-nowrap px-2.5 py-1 rounded-md bg-surface-900 text-white text-[10px] font-medium shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-150 pointer-events-none"
-                            >
-                                {{ message.sender_context.name }}
-                                ·
-                                {{ message.sender_context.role }}
-                            </div>
-
-                            <div
-                                v-if="
-                                    Array.isArray(message.reactions) &&
-                                    message.reactions.length
-                                "
-                                class="flex flex-wrap gap-1 -mt-1 px-2"
-                                :class="
-                                    message.direction === 'outbound'
-                                        ? 'justify-end'
-                                        : 'justify-start'
-                                "
-                            >
-                                <div
-                                    v-for="reaction in message.reactions"
-                                    :key="reaction.id"
-                                    class="inline-flex items-center rounded-full px-1.5 py-0.5 shadow-sm"
-                                >
-                                    <span
-                                        class="text-base leading-none"
-                                        :title="reaction.body"
+                                    <div
+                                        v-if="hasTemplateHeaderVariables"
+                                        class="rounded-xl border border-surface-200 bg-white p-4"
                                     >
-                                        {{ reaction.body }}
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </template>
-
-                <button
-                    v-if="showJumpToLatest"
-                    type="button"
-                    @click="scrollToBottom()"
-                    class="sticky bottom-4 left-1/2 -translate-x-1/2 z-20 mx-auto flex items-center gap-2 bg-slate-800 text-white rounded-full px-4 py-2 text-xs font-medium shadow-lg hover:bg-slate-900"
-                >
-                    <ArrowDown class="w-3.5 h-3.5" />
-
-                    Jump to latest
-                </button>
-            </div>
-
-            <!-- ========================================================= -->
-            <!-- COMPOSER -->
-            <!-- ========================================================= -->
-
-            <div
-                class="bg-white border border-surface-200 rounded-xl shadow-sm shrink-0"
-            >
-                <!-- ===================================================== -->
-                <!-- TEMPLATE SELECTOR -->
-                <!-- ===================================================== -->
-
-                <div v-if="composerMode === 'template'" class="p-4">
-                    <div class="flex items-center justify-between gap-3 mb-3">
-                        <div class="flex items-center gap-2">
-                            <div
-                                class="w-8 h-8 rounded-lg bg-surface-100 flex items-center justify-center"
-                            >
-                                <FileText class="w-4 h-4 text-surface-600" />
-                            </div>
-
-                            <div>
-                                <p
-                                    class="text-sm font-semibold text-surface-900"
-                                >
-                                    Send WhatsApp Template
-                                </p>
-
-                                <p class="text-xs text-surface-500 mt-0.5">
-                                    Select a template and preview it before
-                                    sending.
-                                </p>
-                            </div>
-                        </div>
-
-                        <button
-                            v-if="windowOpen"
-                            type="button"
-                            @click="openNormalComposer"
-                            :disabled="sending"
-                            class="text-xs font-medium text-surface-600 hover:text-surface-900"
-                        >
-                            ← Normal message
-                        </button>
-                    </div>
-
-                    <div
-                        v-if="!templates.length"
-                        class="rounded-lg border border-amber-200 bg-amber-50 p-3"
-                    >
-                        <p class="text-xs font-medium text-amber-800">
-                            No approved WhatsApp templates are available.
-                        </p>
-
-                        <p class="text-[11px] text-amber-700 mt-1">
-                            Please ask your administrator to configure an
-                            approved template for this WhatsApp number.
-                        </p>
-                    </div>
-
-                    <div v-else class="space-y-3">
-                        <select
-                            v-model="selectedTemplate"
-                            :disabled="sending"
-                            class="w-full rounded-lg border border-surface-200 text-sm focus:border-surface-400 focus:ring-0"
-                        >
-                            <option :value="null">Select template</option>
-
-                            <option
-                                v-for="template in templates"
-                                :key="template.id"
-                                :value="template.id"
-                            >
-                                {{ template.name }}
-                                —
-                                {{ template.language }}
-                            </option>
-                        </select>
-
-                        <!-- Selected template -->
-
-                        <div
-                            v-if="selectedTemplateObject"
-                            class="rounded-lg border border-surface-200 bg-surface-50 p-3"
-                        >
-                            <div class="flex items-start justify-between gap-3">
-                                <div class="min-w-0">
-                                    <p
-                                        class="text-xs font-semibold text-surface-800"
-                                    >
-                                        {{ selectedTemplateObject.name }}
-                                    </p>
-
-                                    <p
-                                        class="text-[10px] text-surface-500 mt-0.5"
-                                    >
-                                        {{ selectedTemplateObject.language }}
-
-                                        <span
-                                            v-if="
-                                                selectedTemplateObject.category
-                                            "
+                                        <p
+                                            class="text-xs font-semibold text-surface-800 mb-3"
                                         >
-                                            ·
-                                            {{
-                                                selectedTemplateObject.category
-                                            }}
-                                        </span>
-                                    </p>
-                                </div>
+                                            Header variables
+                                        </p>
 
-                                <span
-                                    class="shrink-0 text-[10px] font-medium px-2 py-1 rounded-full bg-emerald-100 text-emerald-700"
-                                >
-                                    APPROVED
-                                </span>
-                            </div>
-
-                            <div class="flex flex-wrap gap-2 mt-3">
-                                <span
-                                    v-if="hasTemplateBodyVariables"
-                                    class="text-[10px] px-2 py-1 rounded-md bg-white border border-surface-200 text-surface-600"
-                                >
-                                    {{ templateBodyVariables.length }}
-                                    body variable{{
-                                        templateBodyVariables.length === 1
-                                            ? ""
-                                            : "s"
-                                    }}
-                                </span>
-
-                                <span
-                                    v-if="hasTemplateHeaderVariables"
-                                    class="text-[10px] px-2 py-1 rounded-md bg-white border border-surface-200 text-surface-600"
-                                >
-                                    Header variable
-                                </span>
-
-                                <span
-                                    v-if="hasTemplateHeaderMedia"
-                                    class="text-[10px] px-2 py-1 rounded-md bg-white border border-surface-200 text-surface-600"
-                                >
-                                    {{ templateHeaderFormat }}
-                                    header
-                                </span>
-
-                                <span
-                                    v-if="hasTemplateButtonVariables"
-                                    class="text-[10px] px-2 py-1 rounded-md bg-white border border-surface-200 text-surface-600"
-                                >
-                                    Button variable
-                                </span>
-                            </div>
-                        </div>
-
-                        <div class="flex items-center justify-end gap-2">
-                            <button
-                                v-if="windowOpen"
-                                type="button"
-                                @click="openNormalComposer"
-                                :disabled="sending"
-                                class="px-4 py-2 rounded-lg border border-surface-200 text-sm font-medium text-surface-700 hover:bg-surface-50 disabled:opacity-50"
-                            >
-                                Cancel
-                            </button>
-
-                            <button
-                                type="button"
-                                @click="openTemplatePreview"
-                                :disabled="!selectedTemplate || sending"
-                                class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-700 text-white text-sm font-medium hover:bg-slate-900 disabled:opacity-50"
-                            >
-                                <FileText class="w-4 h-4" />
-
-                                Preview Template
-                            </button>
-                        </div>
-                    </div>
-
-                    <p
-                        v-if="!windowOpen"
-                        class="text-[10px] text-amber-600 mt-3"
-                    >
-                        The 24-hour messaging window is closed. A template is
-                        required to start or reopen the conversation.
-                    </p>
-                </div>
-
-                <!-- ===================================================== -->
-                <!-- TEMPLATE PREVIEW -->
-                <!-- ===================================================== -->
-
-                <div
-                    v-if="templatePreviewOpen"
-                    class="border-t border-surface-100 bg-surface-50"
-                >
-                    <div class="p-4">
-                        <div
-                            class="flex items-center justify-between gap-3 mb-4"
-                        >
-                            <div>
-                                <p
-                                    class="text-sm font-semibold text-surface-900"
-                                >
-                                    Preview Template
-                                </p>
-
-                                <p class="text-xs text-surface-500 mt-0.5">
-                                    Review the message, variables and media
-                                    before sending.
-                                </p>
-                            </div>
-
-                            <button
-                                type="button"
-                                @click="closeTemplatePreview"
-                                :disabled="sending"
-                                class="w-8 h-8 rounded-lg border border-surface-200 bg-white flex items-center justify-center text-surface-500 hover:text-surface-900 disabled:opacity-50"
-                            >
-                                <X class="w-4 h-4" />
-                            </button>
-                        </div>
-
-                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                            <!-- Variables -->
-
-                            <div class="space-y-3">
-                                <!-- Body -->
-
-                                <div
-                                    v-if="hasTemplateBodyVariables"
-                                    class="rounded-xl border border-surface-200 bg-white p-4"
-                                >
-                                    <p
-                                        class="text-xs font-semibold text-surface-800 mb-3"
-                                    >
-                                        Body variables
-                                    </p>
-
-                                    <div class="space-y-3">
-                                        <div
-                                            v-for="(
-                                                value, index
-                                            ) in templateBodyVariables"
-                                            :key="`body-${index}`"
-                                        >
-                                            <label
-                                                class="block text-[11px] font-medium text-surface-600 mb-1"
+                                        <div class="space-y-3">
+                                            <div
+                                                v-for="(
+                                                    value, index
+                                                ) in templateHeaderVariables"
+                                                :key="`header-${index}`"
                                             >
-                                                Body variable
-                                                {{ index + 1 }}
-                                            </label>
+                                                <label
+                                                    class="block text-[11px] font-medium text-surface-600 mb-1"
+                                                >
+                                                    Header variable
+                                                    {{ index + 1 }}
+                                                </label>
 
-                                            <input
-                                                v-model="
-                                                    templateBodyVariables[index]
-                                                "
-                                                type="text"
-                                                maxlength="1000"
-                                                :placeholder="`Value for {{${index + 1}}}`"
-                                                class="w-full rounded-lg border border-surface-200 text-sm focus:border-surface-400 focus:ring-0"
+                                                <input
+                                                    v-model="
+                                                        templateHeaderVariables[
+                                                            index
+                                                        ]
+                                                    "
+                                                    type="text"
+                                                    maxlength="1000"
+                                                    class="w-full rounded-lg border border-surface-200 text-sm focus:border-surface-400 focus:ring-0"
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Header media -->
+
+                                    <div
+                                        v-if="hasTemplateHeaderMedia"
+                                        class="rounded-xl border border-surface-200 bg-white p-4"
+                                    >
+                                        <div
+                                            class="flex items-center justify-between gap-2 mb-3"
+                                        >
+                                            <div>
+                                                <p
+                                                    class="text-xs font-semibold text-surface-800"
+                                                >
+                                                    Header
+                                                    {{
+                                                        templateHeaderFormat.toLowerCase()
+                                                    }}
+                                                </p>
+
+                                                <p
+                                                    class="text-[10px] text-surface-500 mt-0.5"
+                                                >
+                                                    Using configured media or
+                                                    Meta template example.
+                                                </p>
+                                            </div>
+
+                                            <Paperclip
+                                                class="w-4 h-4 text-surface-400"
                                             />
                                         </div>
+
+                                        <input
+                                            v-model="templateHeaderMediaUrl"
+                                            type="url"
+                                            maxlength="2048"
+                                            placeholder="https://example.com/file"
+                                            class="w-full rounded-lg border border-surface-200 text-sm focus:border-surface-400 focus:ring-0"
+                                        />
                                     </div>
-                                </div>
 
-                                <!-- Header text -->
+                                    <!-- Button -->
 
-                                <div
-                                    v-if="hasTemplateHeaderVariables"
-                                    class="rounded-xl border border-surface-200 bg-white p-4"
-                                >
-                                    <p
-                                        class="text-xs font-semibold text-surface-800 mb-3"
+                                    <div
+                                        v-if="hasTemplateButtonVariables"
+                                        class="rounded-xl border border-surface-200 bg-white p-4"
                                     >
-                                        Header variables
-                                    </p>
-
-                                    <div class="space-y-3">
-                                        <div
-                                            v-for="(
-                                                value, index
-                                            ) in templateHeaderVariables"
-                                            :key="`header-${index}`"
+                                        <p
+                                            class="text-xs font-semibold text-surface-800 mb-3"
                                         >
-                                            <label
-                                                class="block text-[11px] font-medium text-surface-600 mb-1"
-                                            >
-                                                Header variable
-                                                {{ index + 1 }}
-                                            </label>
+                                            Button variables
+                                        </p>
 
-                                            <input
-                                                v-model="
-                                                    templateHeaderVariables[
-                                                        index
-                                                    ]
-                                                "
-                                                type="text"
-                                                maxlength="1000"
-                                                class="w-full rounded-lg border border-surface-200 text-sm focus:border-surface-400 focus:ring-0"
-                                            />
+                                        <div class="space-y-3">
+                                            <div
+                                                v-for="(
+                                                    item, index
+                                                ) in templateButtonVariables"
+                                                :key="`button-${index}`"
+                                            >
+                                                <label
+                                                    class="block text-[11px] font-medium text-surface-600 mb-1"
+                                                >
+                                                    {{ item.label }}
+                                                </label>
+
+                                                <input
+                                                    v-model="item.value"
+                                                    type="text"
+                                                    maxlength="1000"
+                                                    class="w-full rounded-lg border border-surface-200 text-sm focus:border-surface-400 focus:ring-0"
+                                                />
+                                            </div>
                                         </div>
                                     </div>
+
+                                    <!-- No variables -->
+
+                                    <div
+                                        v-if="
+                                            !hasTemplateBodyVariables &&
+                                            !hasTemplateHeaderVariables &&
+                                            !hasTemplateHeaderMedia &&
+                                            !hasTemplateButtonVariables
+                                        "
+                                        class="rounded-xl border border-surface-200 bg-white p-4"
+                                    >
+                                        <p
+                                            class="text-xs font-medium text-surface-700"
+                                        >
+                                            No variables required
+                                        </p>
+
+                                        <p
+                                            class="text-[10px] text-surface-500 mt-1"
+                                        >
+                                            This template can be sent directly.
+                                        </p>
+                                    </div>
                                 </div>
 
-                                <!-- Header media -->
+                                <!-- WhatsApp Preview -->
 
                                 <div
-                                    v-if="hasTemplateHeaderMedia"
-                                    class="rounded-xl border border-surface-200 bg-white p-4"
+                                    class="rounded-xl border border-surface-200 bg-[#efeae2] p-4"
                                 >
                                     <div
-                                        class="flex items-center justify-between gap-2 mb-3"
+                                        class="flex items-center justify-between mb-3"
                                     >
                                         <div>
                                             <p
                                                 class="text-xs font-semibold text-surface-800"
                                             >
-                                                Header
-                                                {{
-                                                    templateHeaderFormat.toLowerCase()
-                                                }}
+                                                WhatsApp Preview
                                             </p>
 
                                             <p
-                                                class="text-[10px] text-surface-500 mt-0.5"
+                                                class="text-[10px] text-surface-500"
                                             >
-                                                Using configured media or Meta
-                                                template example.
+                                                {{
+                                                    selectedTemplateObject?.name
+                                                }}
                                             </p>
                                         </div>
 
-                                        <Paperclip
-                                            class="w-4 h-4 text-surface-400"
-                                        />
+                                        <span
+                                            class="text-[10px] px-2 py-1 rounded-full bg-white/70 text-surface-600"
+                                        >
+                                            {{
+                                                selectedTemplateObject?.language
+                                            }}
+                                        </span>
                                     </div>
 
-                                    <input
-                                        v-model="templateHeaderMediaUrl"
-                                        type="url"
-                                        maxlength="2048"
-                                        placeholder="https://example.com/file"
-                                        class="w-full rounded-lg border border-surface-200 text-sm focus:border-surface-400 focus:ring-0"
-                                    />
-                                </div>
-
-                                <!-- Button -->
-
-                                <div
-                                    v-if="hasTemplateButtonVariables"
-                                    class="rounded-xl border border-surface-200 bg-white p-4"
-                                >
-                                    <p
-                                        class="text-xs font-semibold text-surface-800 mb-3"
-                                    >
-                                        Button variables
-                                    </p>
-
-                                    <div class="space-y-3">
+                                    <div class="flex justify-end">
                                         <div
-                                            v-for="(
-                                                item, index
-                                            ) in templateButtonVariables"
-                                            :key="`button-${index}`"
+                                            class="w-full max-w-[390px] bg-[#d9fdd3] rounded-xl rounded-tr-sm shadow-sm overflow-hidden"
                                         >
-                                            <label
-                                                class="block text-[11px] font-medium text-surface-600 mb-1"
-                                            >
-                                                {{ item.label }}
-                                            </label>
+                                            <!-- IMAGE -->
 
-                                            <input
-                                                v-model="item.value"
-                                                type="text"
-                                                maxlength="1000"
-                                                class="w-full rounded-lg border border-surface-200 text-sm focus:border-surface-400 focus:ring-0"
-                                            />
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- No variables -->
-
-                                <div
-                                    v-if="
-                                        !hasTemplateBodyVariables &&
-                                        !hasTemplateHeaderVariables &&
-                                        !hasTemplateHeaderMedia &&
-                                        !hasTemplateButtonVariables
-                                    "
-                                    class="rounded-xl border border-surface-200 bg-white p-4"
-                                >
-                                    <p
-                                        class="text-xs font-medium text-surface-700"
-                                    >
-                                        No variables required
-                                    </p>
-
-                                    <p
-                                        class="text-[10px] text-surface-500 mt-1"
-                                    >
-                                        This template can be sent directly.
-                                    </p>
-                                </div>
-                            </div>
-
-                            <!-- WhatsApp Preview -->
-
-                            <div
-                                class="rounded-xl border border-surface-200 bg-[#efeae2] p-4"
-                            >
-                                <div
-                                    class="flex items-center justify-between mb-3"
-                                >
-                                    <div>
-                                        <p
-                                            class="text-xs font-semibold text-surface-800"
-                                        >
-                                            WhatsApp Preview
-                                        </p>
-
-                                        <p class="text-[10px] text-surface-500">
-                                            {{ selectedTemplateObject?.name }}
-                                        </p>
-                                    </div>
-
-                                    <span
-                                        class="text-[10px] px-2 py-1 rounded-full bg-white/70 text-surface-600"
-                                    >
-                                        {{ selectedTemplateObject?.language }}
-                                    </span>
-                                </div>
-
-                                <div class="flex justify-end">
-                                    <div
-                                        class="w-full max-w-[390px] bg-[#d9fdd3] rounded-xl rounded-tr-sm shadow-sm overflow-hidden"
-                                    >
-                                        <!-- IMAGE -->
-
-                                        <div
-                                            v-if="
-                                                templatePreviewHeader?.type ===
-                                                    'image' &&
-                                                templatePreviewHeader?.value
-                                            "
-                                        >
-                                            <img
-                                                :src="
-                                                    templatePreviewHeader.value
-                                                "
-                                                alt="Template header"
-                                                class="w-full max-h-56 object-cover"
-                                            />
-                                        </div>
-
-                                        <!-- VIDEO -->
-
-                                        <div
-                                            v-else-if="
-                                                templatePreviewHeader?.type ===
-                                                    'video' &&
-                                                templatePreviewHeader?.value
-                                            "
-                                            class="bg-black"
-                                        >
-                                            <video
-                                                :src="
-                                                    templatePreviewHeader.value
-                                                "
-                                                controls
-                                                class="w-full max-h-56 object-contain"
-                                            />
-                                        </div>
-
-                                        <!-- DOCUMENT -->
-
-                                        <div
-                                            v-else-if="
-                                                templatePreviewHeader?.type ===
-                                                    'document' &&
-                                                templatePreviewHeader?.value
-                                            "
-                                            class="p-3"
-                                        >
                                             <div
-                                                class="rounded-lg border border-black/10 bg-white/50 p-3 flex items-center gap-3"
+                                                v-if="
+                                                    templatePreviewHeader?.type ===
+                                                        'image' &&
+                                                    templatePreviewHeader?.value
+                                                "
                                             >
-                                                <FileText
-                                                    class="w-6 h-6 text-surface-600"
+                                                <img
+                                                    :src="
+                                                        templatePreviewHeader.value
+                                                    "
+                                                    alt="Template header"
+                                                    class="w-full max-h-56 object-cover"
                                                 />
+                                            </div>
 
-                                                <div class="min-w-0">
-                                                    <p
-                                                        class="text-xs font-medium text-surface-800"
-                                                    >
-                                                        Template document
-                                                    </p>
+                                            <!-- VIDEO -->
 
-                                                    <p
-                                                        class="text-[10px] text-surface-500 truncate"
-                                                    >
-                                                        {{
-                                                            templatePreviewHeader.value
-                                                        }}
-                                                    </p>
+                                            <div
+                                                v-else-if="
+                                                    templatePreviewHeader?.type ===
+                                                        'video' &&
+                                                    templatePreviewHeader?.value
+                                                "
+                                                class="bg-black"
+                                            >
+                                                <video
+                                                    :src="
+                                                        templatePreviewHeader.value
+                                                    "
+                                                    controls
+                                                    class="w-full max-h-56 object-contain"
+                                                />
+                                            </div>
+
+                                            <!-- DOCUMENT -->
+
+                                            <div
+                                                v-else-if="
+                                                    templatePreviewHeader?.type ===
+                                                        'document' &&
+                                                    templatePreviewHeader?.value
+                                                "
+                                                class="p-3"
+                                            >
+                                                <div
+                                                    class="rounded-lg border border-black/10 bg-white/50 p-3 flex items-center gap-3"
+                                                >
+                                                    <FileText
+                                                        class="w-6 h-6 text-surface-600"
+                                                    />
+
+                                                    <div class="min-w-0">
+                                                        <p
+                                                            class="text-xs font-medium text-surface-800"
+                                                        >
+                                                            Template document
+                                                        </p>
+
+                                                        <p
+                                                            class="text-[10px] text-surface-500 truncate"
+                                                        >
+                                                            {{
+                                                                templatePreviewHeader.value
+                                                            }}
+                                                        </p>
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
 
-                                        <!-- HEADER TEXT -->
+                                            <!-- HEADER TEXT -->
 
-                                        <div
-                                            v-if="
-                                                templatePreviewHeader?.type ===
-                                                    'text' &&
-                                                templatePreviewHeader?.value
-                                            "
-                                            class="px-3 pt-3"
-                                        >
-                                            <p
-                                                class="text-sm font-semibold text-surface-900 whitespace-pre-wrap break-words"
-                                            >
-                                                {{
-                                                    templatePreviewHeader.value
-                                                }}
-                                            </p>
-                                        </div>
-
-                                        <!-- BODY -->
-
-                                        <div class="px-3 pt-3 pb-1">
-                                            <p
-                                                class="text-sm text-surface-900 whitespace-pre-wrap break-words"
-                                            >
-                                                {{
-                                                    templatePreviewBody ||
-                                                    "Template body preview"
-                                                }}
-                                            </p>
-                                        </div>
-
-                                        <!-- BUTTONS -->
-
-                                        <div
-                                            v-if="templatePreviewButtons.length"
-                                            class="px-3 pb-2 pt-2 space-y-1"
-                                        >
                                             <div
-                                                v-for="(
-                                                    button, index
-                                                ) in templatePreviewButtons"
-                                                :key="index"
-                                                class="text-center py-2 border-t border-black/10 text-xs font-medium text-blue-600"
+                                                v-if="
+                                                    templatePreviewHeader?.type ===
+                                                        'text' &&
+                                                    templatePreviewHeader?.value
+                                                "
+                                                class="px-3 pt-3"
                                             >
-                                                {{ button.text || button.type }}
-
-                                                <span
-                                                    v-if="
-                                                        button.type === 'URL' &&
-                                                        button.previewUrl
-                                                    "
-                                                    class="block text-[9px] text-surface-400 mt-0.5 truncate"
+                                                <p
+                                                    class="text-sm font-semibold text-surface-900 whitespace-pre-wrap break-words"
                                                 >
-                                                    {{ button.previewUrl }}
+                                                    {{
+                                                        templatePreviewHeader.value
+                                                    }}
+                                                </p>
+                                            </div>
+
+                                            <!-- BODY -->
+
+                                            <div class="px-3 pt-3 pb-1">
+                                                <p
+                                                    class="text-sm text-surface-900 whitespace-pre-wrap break-words"
+                                                >
+                                                    {{
+                                                        templatePreviewBody ||
+                                                        "Template body preview"
+                                                    }}
+                                                </p>
+                                            </div>
+
+                                            <!-- BUTTONS -->
+
+                                            <div
+                                                v-if="
+                                                    templatePreviewButtons.length
+                                                "
+                                                class="px-3 pb-2 pt-2 space-y-1"
+                                            >
+                                                <div
+                                                    v-for="(
+                                                        button, index
+                                                    ) in templatePreviewButtons"
+                                                    :key="index"
+                                                    class="text-center py-2 border-t border-black/10 text-xs font-medium text-blue-600"
+                                                >
+                                                    {{
+                                                        button.text ||
+                                                        button.type
+                                                    }}
+
+                                                    <span
+                                                        v-if="
+                                                            button.type ===
+                                                                'URL' &&
+                                                            button.previewUrl
+                                                        "
+                                                        class="block text-[9px] text-surface-400 mt-0.5 truncate"
+                                                    >
+                                                        {{ button.previewUrl }}
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            <div
+                                                class="px-3 pb-2 flex justify-end"
+                                            >
+                                                <span
+                                                    class="text-[9px] text-surface-400"
+                                                >
+                                                    now
                                                 </span>
                                             </div>
                                         </div>
+                                    </div>
+                                </div>
+                            </div>
 
-                                        <div class="px-3 pb-2 flex justify-end">
-                                            <span
-                                                class="text-[9px] text-surface-400"
+                            <!-- Actions -->
+
+                            <div
+                                class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-4"
+                            >
+                                <p
+                                    v-if="templateHasMissingVariables"
+                                    class="text-[11px] text-amber-600"
+                                >
+                                    Please complete all required template values
+                                    before sending.
+                                </p>
+
+                                <p v-else class="text-[11px] text-emerald-600">
+                                    Template is ready to send.
+                                </p>
+
+                                <div
+                                    class="flex items-center justify-end gap-2"
+                                >
+                                    <button
+                                        type="button"
+                                        @click="closeTemplatePreview"
+                                        :disabled="sending"
+                                        class="px-4 py-2 rounded-lg border border-surface-200 bg-white text-sm font-medium text-surface-700 hover:bg-surface-50 disabled:opacity-50"
+                                    >
+                                        Back
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        @click="sendTemplate"
+                                        :disabled="
+                                            sending ||
+                                            !selectedTemplateObject ||
+                                            templateHasMissingVariables
+                                        "
+                                        class="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-slate-700 text-white text-sm font-medium hover:bg-slate-900 disabled:opacity-50"
+                                    >
+                                        <LoaderCircle
+                                            v-if="sending"
+                                            class="w-4 h-4 animate-spin"
+                                        />
+
+                                        <Send v-else class="w-4 h-4" />
+
+                                        {{
+                                            sending
+                                                ? "Sending..."
+                                                : "Send Template"
+                                        }}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ===================================================== -->
+                    <!-- NORMAL MESSAGE COMPOSER -->
+                    <!-- ===================================================== -->
+
+                    <div v-if="composerMode === 'normal'" class="p-4">
+                        <div
+                            v-if="selectedFiles.length"
+                            class="mb-3 rounded-lg bg-surface-50 border border-surface-200 p-3"
+                        >
+                            <div class="flex items-center justify-between mb-2">
+                                <p
+                                    class="text-xs font-semibold text-surface-700"
+                                >
+                                    {{ selectedFiles.length }}
+                                    {{
+                                        selectedFiles.length === 1
+                                            ? "file"
+                                            : "files"
+                                    }}
+                                    selected
+                                </p>
+
+                                <button
+                                    type="button"
+                                    @click="clearFiles"
+                                    :disabled="sending"
+                                    class="text-[11px] font-medium text-surface-400 hover:text-red-600 disabled:opacity-50"
+                                >
+                                    Clear all
+                                </button>
+                            </div>
+
+                            <div class="space-y-1.5 max-h-32 overflow-y-auto">
+                                <div
+                                    v-for="(file, index) in selectedFiles"
+                                    :key="`${file.name}-${file.size}-${index}`"
+                                    class="flex items-center justify-between gap-3 rounded-lg bg-white border border-surface-200 px-3 py-2"
+                                >
+                                    <div
+                                        class="flex items-center gap-2 min-w-0"
+                                    >
+                                        <Paperclip
+                                            class="w-4 h-4 text-surface-500 shrink-0"
+                                        />
+
+                                        <div class="min-w-0">
+                                            <p
+                                                class="text-xs text-surface-700 truncate"
                                             >
-                                                now
-                                            </span>
+                                                {{ file.name }}
+                                            </p>
+
+                                            <p
+                                                class="text-[10px] text-surface-400"
+                                            >
+                                                {{ formatFileSize(file.size) }}
+                                            </p>
                                         </div>
                                     </div>
+
+                                    <button
+                                        type="button"
+                                        @click="removeFile(index)"
+                                        :disabled="sending"
+                                        class="text-surface-400 hover:text-red-600 shrink-0 disabled:opacity-50"
+                                    >
+                                        <X class="w-4 h-4" />
+                                    </button>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- Actions -->
+                        <div class="flex items-end gap-2">
+                            <label
+                                class="w-10 h-10 rounded-lg border border-surface-200 flex items-center justify-center cursor-pointer text-surface-500 hover:bg-surface-50"
+                            >
+                                <Paperclip class="w-4 h-4" />
+
+                                <input
+                                    type="file"
+                                    class="hidden"
+                                    multiple
+                                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx"
+                                    @change="selectFile"
+                                />
+                            </label>
+
+                            <textarea
+                                v-model="messageText"
+                                rows="2"
+                                placeholder="Type a message..."
+                                class="flex-1 resize-none rounded-lg border border-surface-200 text-sm focus:border-surface-400 focus:ring-0"
+                                @keydown.enter.exact.prevent="
+                                    sendCurrentMessage
+                                "
+                            />
+
+                            <button
+                                v-if="selectedFiles.length"
+                                type="button"
+                                @click="sendAttachment"
+                                :disabled="sending"
+                                class="w-10 h-10 rounded-lg bg-slate-700 text-white flex items-center justify-center hover:bg-slate-900 disabled:opacity-50"
+                            >
+                                <Send class="w-4 h-4" />
+                            </button>
+
+                            <button
+                                v-else
+                                type="button"
+                                @click="sendTextMessage"
+                                :disabled="!messageText.trim() || sending"
+                                class="w-10 h-10 rounded-lg bg-slate-700 text-white flex items-center justify-center hover:bg-slate-900 disabled:opacity-50"
+                            >
+                                <Send class="w-4 h-4" />
+                            </button>
+                        </div>
 
                         <div
-                            class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-4"
+                            class="flex items-center justify-between gap-3 mt-2"
                         >
-                            <p
-                                v-if="templateHasMissingVariables"
-                                class="text-[11px] text-amber-600"
+                            <p class="text-[10px] text-surface-400">
+                                WhatsApp number:
+                                {{ whatsappNumber || "Not assigned" }}
+                            </p>
+
+                            <button
+                                type="button"
+                                @click="openTemplateComposer"
+                                :disabled="sending || !templates.length"
+                                class="inline-flex items-center gap-1.5 text-[11px] font-medium text-surface-500 hover:text-surface-900 disabled:opacity-40"
                             >
-                                Please complete all required template values
-                                before sending.
-                            </p>
+                                <FileText class="w-3.5 h-3.5" />
 
-                            <p v-else class="text-[11px] text-emerald-600">
-                                Template is ready to send.
-                            </p>
-
-                            <div class="flex items-center justify-end gap-2">
-                                <button
-                                    type="button"
-                                    @click="closeTemplatePreview"
-                                    :disabled="sending"
-                                    class="px-4 py-2 rounded-lg border border-surface-200 bg-white text-sm font-medium text-surface-700 hover:bg-surface-50 disabled:opacity-50"
-                                >
-                                    Back
-                                </button>
-
-                                <button
-                                    type="button"
-                                    @click="sendTemplate"
-                                    :disabled="
-                                        sending ||
-                                        !selectedTemplateObject ||
-                                        templateHasMissingVariables
-                                    "
-                                    class="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-slate-700 text-white text-sm font-medium hover:bg-slate-900 disabled:opacity-50"
-                                >
-                                    <LoaderCircle
-                                        v-if="sending"
-                                        class="w-4 h-4 animate-spin"
-                                    />
-
-                                    <Send v-else class="w-4 h-4" />
-
-                                    {{
-                                        sending ? "Sending..." : "Send Template"
-                                    }}
-                                </button>
-                            </div>
+                                Send template instead
+                            </button>
                         </div>
                     </div>
                 </div>
-
-                <!-- ===================================================== -->
-                <!-- NORMAL MESSAGE COMPOSER -->
-                <!-- ===================================================== -->
-
-                <div v-if="composerMode === 'normal'" class="p-4">
-                    <div
-                        v-if="selectedFile"
-                        class="mb-3 flex items-center justify-between rounded-lg bg-surface-50 border border-surface-200 px-3 py-2"
-                    >
-                        <div class="flex items-center gap-2 min-w-0">
-                            <Paperclip
-                                class="w-4 h-4 text-surface-500 shrink-0"
-                            />
-
-                            <span class="text-xs text-surface-700 truncate">
-                                {{ selectedFile.name }}
-                            </span>
-                        </div>
-
-                        <button
-                            type="button"
-                            @click="removeFile"
-                            class="text-surface-400 hover:text-red-600"
-                        >
-                            <X class="w-4 h-4" />
-                        </button>
-                    </div>
-
-                    <div class="flex items-end gap-2">
-                        <label
-                            class="w-10 h-10 rounded-lg border border-surface-200 flex items-center justify-center cursor-pointer text-surface-500 hover:bg-surface-50"
-                        >
-                            <Paperclip class="w-4 h-4" />
-
-                            <input
-                                type="file"
-                                class="hidden"
-                                accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx"
-                                @change="selectFile"
-                            />
-                        </label>
-
-                        <textarea
-                            v-model="messageText"
-                            rows="2"
-                            placeholder="Type a message..."
-                            class="flex-1 resize-none rounded-lg border border-surface-200 text-sm focus:border-surface-400 focus:ring-0"
-                            @keydown.enter.exact.prevent="sendCurrentMessage"
-                        />
-
-                        <button
-                            v-if="selectedFile"
-                            type="button"
-                            @click="sendAttachment"
-                            :disabled="sending"
-                            class="w-10 h-10 rounded-lg bg-slate-700 text-white flex items-center justify-center hover:bg-slate-900 disabled:opacity-50"
-                        >
-                            <Send class="w-4 h-4" />
-                        </button>
-
-                        <button
-                            v-else
-                            type="button"
-                            @click="sendTextMessage"
-                            :disabled="!messageText.trim() || sending"
-                            class="w-10 h-10 rounded-lg bg-slate-700 text-white flex items-center justify-center hover:bg-slate-900 disabled:opacity-50"
-                        >
-                            <Send class="w-4 h-4" />
-                        </button>
-                    </div>
-
-                    <div class="flex items-center justify-between gap-3 mt-2">
-                        <p class="text-[10px] text-surface-400">
-                            WhatsApp number:
-                            {{ whatsappNumber || "Not assigned" }}
-                        </p>
-
-                        <button
-                            type="button"
-                            @click="openTemplateComposer"
-                            :disabled="sending || !templates.length"
-                            class="inline-flex items-center gap-1.5 text-[11px] font-medium text-surface-500 hover:text-surface-900 disabled:opacity-40"
-                        >
-                            <FileText class="w-3.5 h-3.5" />
-
-                            Send template instead
-                        </button>
-                    </div>
-                </div>
-            </div>
             </main>
         </div>
     </TeamAdminLayout>
