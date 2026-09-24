@@ -339,7 +339,7 @@ const canSendNormalMessage = computed(() => {
 */
 
 const customerPhone = computed(() => {
-    const phone = props.customer?.masked_phone ?? props.customer?.phone ?? null;
+    const phone = props.customer?.masked_phone ?? null;
 
     if (!phone) {
         return "No phone number";
