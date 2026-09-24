@@ -207,6 +207,11 @@ class CustomerController extends Controller
         | The executive cannot choose another team/user.
         |
         */
+        $customer = Customer::where('phone', $validated['phone'])->first();
+
+        if($customer){
+            return redirect()->back()->with('error', 'Customer with this number already exist');
+        }
 
         $customer = Customer::create([
             'team_id' => $team->id,

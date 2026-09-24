@@ -85,6 +85,72 @@ class BitrixLeadService
         return $lead;
     }
 
+    public function fetchLeadAgentByMobile(string $mobile): array
+    {
+        $baseUrl = rtrim(
+            (string) config('services.bitrix_leads.url'),
+            '/'
+        );
+
+        $username = config('services.bitrix_leads.username');
+        $password = config('services.bitrix_leads.password');
+
+        if (!$username || !$password) {
+            throw new RuntimeException(
+                'Bitrix lead API credentials are not configured.'
+            );
+        }
+
+        $mobile = preg_replace('/\D+/', '', $mobile);
+
+        $url = "{$baseUrl}/GetLeadAgentByMobile";
+
+        $response = Http::withBasicAuth($username, $password)
+            ->acceptJson()
+            ->timeout(
+                config('services.bitrix_leads.timeout', 20)
+            )
+            ->retry(
+                2,
+                500,
+                throw: false
+            )
+            ->get($url, [
+                'mobile' => $mobile,
+            ]);
+
+        /*
+         * "No lead found" is a valid business response.
+         *
+         * Example:
+         * {
+         *     "Message": "No lead found for this mobile number"
+         * }
+         *
+         * In this case return an empty array so the caller
+         * can continue with round-robin assignment.
+         */
+        if ($response->successful()) {
+            $data = $response->json();
+
+            return is_array($data) ? $data : [];
+        }
+
+        /*
+         * Bitrix API failure should NOT stop WhatsApp customer
+         * creation. Log it and let resolveCustomer() fall back
+         * to round-robin.
+         */
+        Log::error('Bitrix lead agent lookup failed.', [
+            'mobile' => $mobile,
+            'url' => $url,
+            'status' => $response->status(),
+            'body' => $response->body(),
+        ]);
+
+        return [];
+    }
+
     /**
      * Fetch and synchronize a Bitrix lead.
      */

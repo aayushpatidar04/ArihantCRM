@@ -214,6 +214,12 @@ class CustomerController extends Controller
             ],
         ]);
 
+        $customer = Customer::where('phone', $validated['phone'])->first();
+
+        if($customer){
+            return redirect()->back()->with('error', 'Customer with this number already exist');
+        }
+
         Customer::create([
             'name' => $validated['name'],
             'phone' => $validated['phone'],

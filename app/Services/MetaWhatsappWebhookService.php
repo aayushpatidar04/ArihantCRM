@@ -994,131 +994,187 @@ class MetaWhatsappWebhookService
         array $contact,
         WhatsappNumber $whatsappNumber
     ): ?Customer {
-        $phone = preg_replace(
-            '/[^0-9]/',
-            '',
-            $phone
-        );
+        $phone = preg_replace('/\D+/', '', $phone);
 
         if (!$phone) {
             return null;
         }
 
         /*
-         * First, try to find existing customer with this phone.
-         * Check both formats: with and without leading +
+         * ---------------------------------------------------------
+         * 1. FIRST: Check our local CRM
+         * ---------------------------------------------------------
          */
         $customer = Customer::query()
             ->where(function ($query) use ($phone) {
-                $query
-                    ->where('phone', $phone)
+                $query->where('phone', $phone)
                     ->orWhere('phone', '+' . $phone);
             })
             ->first();
 
         if ($customer) {
-            \Log::debug('Found existing customer', [
+            Log::debug('Found existing local customer.', [
                 'customer_id' => $customer->id,
                 'phone' => $phone,
             ]);
+
             return $customer;
         }
 
         /*
-         * Customer doesn't exist, create new one.
-         * Use firstOrCreate to avoid race conditions when multiple
-         * webhooks arrive simultaneously for the same phone number.
+         * ---------------------------------------------------------
+         * 2. CUSTOMER DOES NOT EXIST LOCALLY
+         *
+         *    Ask Bitrix who owns this lead.
+         * ---------------------------------------------------------
          */
-        $assignment = $this->resolveRoundRobinAssignment($whatsappNumber);
+        $bitrixResponse = [];
 
-        if (!$assignment) {
-            \Log::warning('Could not resolve round-robin assignment', [
+        try {
+            $bitrixResponse = app(BitrixLeadService::class)
+                ->fetchLeadAgentByMobile($phone);
+        } catch (\Throwable $e) {
+            /*
+             * Bitrix failure should not break the WhatsApp webhook.
+             * We will simply fall back to round-robin.
+             */
+            Log::warning(
+                'Bitrix agent lookup failed. Falling back to round-robin.',
+                [
+                    'phone' => $phone,
+                    'error' => $e->getMessage(),
+                ]
+            );
+        }
+
+        /*
+         * ---------------------------------------------------------
+         * 3. Try to resolve Bitrix Agent.Id to local CRM user
+         * ---------------------------------------------------------
+         */
+        $assignedUser = $this->resolveBitrixAssignedUser(
+            $bitrixResponse
+        );
+
+        $assignedUserId = null;
+        $assignedTeamId = null;
+
+        if ($assignedUser) {
+            /*
+             * Bitrix agent exists in our CRM.
+             *
+             * Use that executive directly.
+             */
+            $assignedUserId = $assignedUser->id;
+            $assignedTeamId = $assignedUser->team_id;
+
+            Log::info('Assigning new customer to Bitrix lead agent.', [
                 'phone' => $phone,
-                'whatsapp_number_id' => $whatsappNumber->id,
+                'bitrix_user_id' => $assignedUser->bitrix_user_id,
+                'user_id' => $assignedUser->id,
+                'team_id' => $assignedUser->team_id,
             ]);
+        }
+
+        /*
+         * ---------------------------------------------------------
+         * 4. Bitrix agent missing/not mapped?
+         *
+         *    Fall back to existing round-robin logic.
+         * ---------------------------------------------------------
+         */
+        if (!$assignedUserId) {
+            Log::info(
+                'No valid local Bitrix agent found. Using round-robin.',
+                [
+                    'phone' => $phone,
+                    'bitrix_agent_id' => data_get(
+                        $bitrixResponse,
+                        'Agent.Id'
+                    ),
+                ]
+            );
+
+            $assignment = $this->resolveRoundRobinAssignment(
+                $whatsappNumber
+            );
+
+            if (!$assignment) {
+                Log::warning(
+                    'No executive available for round-robin assignment.',
+                    [
+                        'phone' => $phone,
+                        'whatsapp_number_id' => $whatsappNumber->id,
+                    ]
+                );
+
+                return null;
+            }
+
+            $assignedUserId = $assignment['user_id'];
+            $assignedTeamId = $assignment['team_id'];
+        }
+
+        /*
+         * ---------------------------------------------------------
+         * 5. Customer name
+         * ---------------------------------------------------------
+         */
+        $name = data_get(
+            $contact,
+            'profile.name',
+            $phone
+        );
+
+        /*
+         * ---------------------------------------------------------
+         * 6. Create the local customer
+         * ---------------------------------------------------------
+         */
+        $customer = Customer::create([
+            'name' => $name,
+            'phone' => $phone,
+            'team_id' => $assignedTeamId,
+            'assigned_to' => $assignedUserId,
+            'status' => 'active',
+        ]);
+
+        Log::info('New customer created.', [
+            'customer_id' => $customer->id,
+            'phone' => $phone,
+            'assigned_to' => $assignedUserId,
+            'team_id' => $assignedTeamId,
+            'assignment_source' => $assignedUser
+                ? 'bitrix'
+                : 'round_robin',
+        ]);
+
+        return $customer;
+    }
+
+    protected function resolveBitrixAssignedUser(array $bitrixResponse): ?User
+    {
+        $agentId = data_get($bitrixResponse, 'Agent.Id');
+
+        if (!$agentId) {
             return null;
         }
 
-        $name = $contact['profile']['name'] ?? $phone;
+        $agent = User::query()
+            ->where('bitrix_user_id', (string) $agentId)
+            ->where('is_active', true)
+            ->first();
 
-        try {
-            /*
-             * Use firstOrCreate with transaction to atomically handle
-             * the race condition where two webhooks arrive for same phone.
-             */
-            $customer = DB::transaction(function () use ($name, $phone, $assignment) {
-                /*
-                 * Double-check inside transaction to catch any customer
-                 * that was created between our last check and this transaction.
-                 */
-                $existing = Customer::query()
-                    ->where(function ($query) use ($phone) {
-                        $query
-                            ->where('phone', $phone)
-                            ->orWhere('phone', '+' . $phone);
-                    })
-                    ->first();
-
-                if ($existing) {
-                    \Log::debug('Customer created by concurrent request, using that', [
-                        'customer_id' => $existing->id,
-                        'phone' => $phone,
-                    ]);
-                    return $existing;
-                }
-
-                $newCustomer = Customer::create([
-                    'name' => $name,
-                    'phone' => $phone,
-                    'team_id' => $assignment['team_id'],
-                    'assigned_to' => $assignment['user_id'],
-                    'status' => 'active',
-                ]);
-
-                \Log::info('Created new customer from webhook', [
-                    'customer_id' => $newCustomer->id,
-                    'phone' => $phone,
-                    'name' => $name,
-                ]);
-
-                return $newCustomer;
-            });
-
-            return $customer;
-
-        } catch (\Illuminate\Database\QueryException $e) {
-            /*
-             * Handle duplicate key errors gracefully.
-             * This can still happen if there's a race condition at the database level.
-             * In this case, fetch the customer that was created by the other process.
-             */
-            if ($e->getCode() === '23000' || str_contains($e->getMessage(), 'Duplicate entry')) {
-                \Log::warning('Duplicate customer creation detected, fetching existing customer', [
-                    'phone' => $phone,
-                    'error' => $e->getMessage(),
-                ]);
-
-                $customer = Customer::query()
-                    ->where(function ($query) use ($phone) {
-                        $query
-                            ->where('phone', $phone)
-                            ->orWhere('phone', '+' . $phone);
-                    })
-                    ->first();
-
-                if ($customer) {
-                    return $customer;
-                }
-            }
-
-            \Log::error('Failed to create customer', [
-                'phone' => $phone,
-                'error' => $e->getMessage(),
-                'code' => $e->getCode(),
+        if (!$agent) {
+            Log::warning('Bitrix agent was found but no active local user matched.', [
+                'bitrix_user_id' => $agentId,
+                'agent_name' => data_get($bitrixResponse, 'Agent.Name'),
             ]);
 
-            throw $e;
+            return null;
         }
+
+        return $agent;
     }
 
     /*
