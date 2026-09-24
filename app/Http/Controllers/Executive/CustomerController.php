@@ -63,7 +63,7 @@ class CustomerController extends Controller
                                 'phone',
                                 'like',
                                 "%{$search}%"
-                            );
+                            )->orWhere('bitrix_lead_id', 'like', "%{$search}%");
                     });
                 }
             )

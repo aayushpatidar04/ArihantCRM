@@ -65,7 +65,8 @@ class CustomerController extends Controller
                     $q
                         ->where('name', 'like', "%{$search}%")
                         ->orWhere('phone', 'like', "%{$search}%")
-                        ->orWhere('email', 'like', "%{$search}%");
+                        ->orWhere('email', 'like', "%{$search}%")
+                        ->orWhere('bitrix_lead_id', 'like', "%{$search}%");
                 });
             })
 
