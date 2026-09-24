@@ -581,8 +581,6 @@ class BitrixSyncCommand extends Command
             }
 
             $departmentIds = $this->getAgentDepartmentIds($agent);
-            \Log::info($agentId);
-            \Log::info($departmentIds);
             if (empty($departmentIds)) {
                 continue;
             }
@@ -811,7 +809,7 @@ class BitrixSyncCommand extends Command
             }
 
             $user->name = $this->getAgentName($agent);
-
+            $user->bitrix_user_id = $bitrixUserId;
             $email = $this->getAgentEmail($agent);
 
             if ($email !== '') {
