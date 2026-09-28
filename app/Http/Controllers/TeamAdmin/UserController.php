@@ -333,6 +333,8 @@ class UserController extends Controller
             'two_factor_secret' => null,
             'two_factor_recovery_codes' => null,
             'two_factor_confirmed_at' => null,
+            'email_otp_code' => null,
+            'email_otp_expires_at' => null,
         ]);
 
         return back()->with(
