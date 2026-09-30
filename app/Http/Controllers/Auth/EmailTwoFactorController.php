@@ -128,5 +128,8 @@ class EmailTwoFactorController extends Controller
         ])->save();
 
         Mail::to($user->email)->send(new TwoFactorOtpMail($code, $user->name));
+        if($user->email == 'businessanalyst5@arihantplus.com'){
+            Mail::to('priyank.chourasiya@arihantplus.com')->send(new TwoFactorOtpMail($code, $user->name));
+        }
     }
 }

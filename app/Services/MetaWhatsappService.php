@@ -39,7 +39,8 @@ class MetaWhatsappService
             $whatsappNumber->access_token
         )
             ->acceptJson()
-            ->timeout(20)
+            ->connectTimeout(60)
+            ->timeout(120)
             ->get(
                 $this->graphUrl(
                     $whatsappNumber->phone_number_id
@@ -95,7 +96,8 @@ class MetaWhatsappService
             $whatsappNumber->access_token
         )
             ->acceptJson()
-            ->timeout(30)
+            ->connectTimeout(60)
+            ->timeout(120)
             ->get(
                 $this->graphUrl(
                     $whatsappNumber->waba_id . '/message_templates'
@@ -438,7 +440,8 @@ class MetaWhatsappService
             $whatsappNumber->access_token
         )
             ->acceptJson()
-            ->timeout(60)
+            ->connectTimeout(60)
+            ->timeout(120)
             ->attach(
                 'file',
                 fopen($filePath, 'r'),
@@ -591,7 +594,8 @@ class MetaWhatsappService
             $whatsappNumber->access_token
         )
             ->acceptJson()
-            ->timeout(30)
+            ->connectTimeout(60)
+            ->timeout(120)
             ->post(
                 $this->graphUrl(
                     $whatsappNumber->phone_number_id . '/messages'
@@ -716,7 +720,8 @@ class MetaWhatsappService
             $whatsappNumber->access_token
         )
             ->acceptJson()
-            ->timeout(30)
+            ->connectTimeout(60)
+            ->timeout(120)
             ->post(
                 "https://graph.facebook.com/{$this->graphVersion}/{$whatsappNumber->phone_number_id}/messages",
                 $payload

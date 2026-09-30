@@ -1296,12 +1296,12 @@ class MessageController extends Controller
                 |--------------------------------------------------------------------------
                 */
 
-                $httpResponse = \Illuminate\Support\Facades\Http::timeout(60)
+                $httpResponse = Http::timeout(60)
                     ->connectTimeout(15)
                     ->get($headerMediaUrl);
 
                 if (!$httpResponse->successful()) {
-                    throw new \RuntimeException(
+                    throw new RuntimeException(
                         'Unable to download template header media.'
                     );
                 }
