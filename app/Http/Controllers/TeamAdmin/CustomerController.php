@@ -10,6 +10,7 @@ use App\Services\TeamWorkspaceService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -217,8 +218,31 @@ class CustomerController extends Controller
 
         $customer = Customer::where('phone', $validated['phone'])->first();
 
-        if($customer){
+        if ($customer) {
             return redirect()->back()->with('error', 'Customer with this number already exist');
+        }
+
+        $bitrixResponse = null;
+
+        try {
+            $bitrixResponse = app(\App\Services\BitrixLeadService::class)
+                ->fetchLeadAgentByMobile($validated['phone']);
+        } catch (\Throwable $e) {
+            Log::warning('Bitrix agent lookup failed during manual customer creation.', [
+                'phone' => $validated['phone'],
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        /*
+         * If Bitrix returned a lead/agent, block creation and ask the
+         * user to use the "Fetch Bitrix lead" option instead.
+         */
+        if ($bitrixResponse && data_get($bitrixResponse, 'Agent.Id')) {
+            return redirect()->back()->with(
+                'error',
+                'A lead with this number already exists in Bitrix. Please use the "Fetch Bitrix lead" option to import the existing lead.'
+            );
         }
 
         Customer::create([
@@ -243,6 +267,43 @@ class CustomerController extends Controller
                 $validated['tags'] ?? null,
         ]);
 
+        try {
+            $assignedUser = $validated['assigned_to']
+                ? User::find($validated['assigned_to'])
+                : null;
+
+            $agentEmail = $assignedUser?->email ?? null;
+
+            \Illuminate\Support\Facades\Http::withBasicAuth(
+                'satapark.arihantcapital',
+                'Arinant@12345'
+            )
+                ->acceptJson()
+                ->timeout(15)
+                ->post(
+                    'https://inspection.arihantcapital.com/api/v1/CtC/whatsappLeadDataSave',
+                    [
+                        'MobileNo' => $validated['phone'],
+                        'AssignedToID' => $assignedUser->bitrix_user_id ?? null,
+                        'AgentEmail' => $agentEmail,
+                    ]
+                );
+
+            Log::info('New customer pushed to Bitrix via inspection API.', [
+                'customer_id' => $customer->id,
+                'phone' => $validated['phone'],
+                'assigned_to' => $assignedUser->bitrix_user_id,
+                'agent_email' => $agentEmail,
+            ]);
+
+        } catch (\Throwable $e) {
+            Log::warning('Failed to push new lead to Bitrix inspection API.', [
+                'customer_id' => $customer->id,
+                'phone' => $validated['phone'],
+                'error' => $e->getMessage(),
+            ]);
+        }
+
         return redirect()
             ->route('team-admin.customers.index')
             ->with(
@@ -254,7 +315,8 @@ class CustomerController extends Controller
     /**
      * Show customer.
      */
-    public function show(Request $request, Customer $customer): Response {
+    public function show(Request $request, Customer $customer): Response
+    {
         $user = $request->user();
 
         abort_unless(
@@ -315,7 +377,8 @@ class CustomerController extends Controller
     /**
      * Show edit form.
      */
-    public function edit(Request $request, Customer $customer): Response {
+    public function edit(Request $request, Customer $customer): Response
+    {
         $user = $request->user();
 
         abort_unless(
@@ -365,7 +428,8 @@ class CustomerController extends Controller
     /**
      * Update customer.
      */
-    public function update(Request $request, Customer $customer): RedirectResponse {
+    public function update(Request $request, Customer $customer): RedirectResponse
+    {
         $user = $request->user();
 
         abort_unless(
@@ -456,7 +520,8 @@ class CustomerController extends Controller
     /**
      * Delete customer.
      */
-    public function destroy(Request $request, Customer $customer): RedirectResponse {
+    public function destroy(Request $request, Customer $customer): RedirectResponse
+    {
         $user = $request->user();
 
         abort_unless(
@@ -483,7 +548,8 @@ class CustomerController extends Controller
             );
     }
 
-    public function assign(Request $request, Customer $customer): RedirectResponse {
+    public function assign(Request $request, Customer $customer): RedirectResponse
+    {
         $user = $request->user();
 
         $team = $this->currentTeam($user);
@@ -491,8 +557,8 @@ class CustomerController extends Controller
         abort_unless($team, 403, 'No workspace selected.');
 
         /*
-        * Customer must belong to the current workspace.
-        */
+         * Customer must belong to the current workspace.
+         */
         abort_unless(
             (int) $customer->team_id === (int) $team->id,
             404
@@ -521,8 +587,8 @@ class CustomerController extends Controller
         }
 
         /*
-        * Nothing to change.
-        */
+         * Nothing to change.
+         */
         if (
             (int) $customer->assigned_to ===
             (int) $newOwner->id
@@ -533,13 +599,10 @@ class CustomerController extends Controller
             );
         }
 
-        DB::transaction(function () use (
-            $customer,
-            $newOwner
-        ) {
+        DB::transaction(function () use ($customer, $newOwner) {
             /*
-            * Preserve the current owner before changing it.
-            */
+             * Preserve the current owner before changing it.
+             */
             $previousOwnerId = $customer->assigned_to;
 
             $customer->update([
@@ -547,9 +610,9 @@ class CustomerController extends Controller
                 'assigned_to' => $newOwner->id,
 
                 /*
-                * IMPORTANT:
-                * Team always follows the assigned user's team.
-                */
+                 * IMPORTANT:
+                 * Team always follows the assigned user's team.
+                 */
                 'team_id' => $newOwner->team_id,
             ]);
         });

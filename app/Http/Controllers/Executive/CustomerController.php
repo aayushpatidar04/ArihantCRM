@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
 use Inertia\Response;
+use Illuminate\Support\Facades\Log;
 
 class CustomerController extends Controller
 {
@@ -213,6 +214,29 @@ class CustomerController extends Controller
             return redirect()->back()->with('error', 'Customer with this number already exist');
         }
 
+        $bitrixResponse = null;
+
+        try {
+            $bitrixResponse = app(\App\Services\BitrixLeadService::class)
+                ->fetchLeadAgentByMobile($validated['phone']);
+        } catch (\Throwable $e) {
+            Log::warning('Bitrix agent lookup failed during manual customer creation.', [
+                'phone' => $validated['phone'],
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        /*
+         * If Bitrix returned a lead/agent, block creation and ask the
+         * user to use the "Fetch Bitrix lead" option instead.
+         */
+        if ($bitrixResponse && data_get($bitrixResponse, 'Agent.Id')) {
+            return redirect()->back()->with(
+                'error',
+                'A lead with this number already exists in Bitrix. Please use the "Fetch Bitrix lead" option to import the existing lead.'
+            );
+        }
+
         $customer = Customer::create([
             'team_id' => $team->id,
 
@@ -228,6 +252,37 @@ class CustomerController extends Controller
 
             'status' => 'active',
         ]);
+
+        try {
+            \Illuminate\Support\Facades\Http::withBasicAuth(
+                'satapark.arihantcapital',
+                'Arinant@12345'
+            )
+                ->acceptJson()
+                ->timeout(15)
+                ->post(
+                    'https://inspection.arihantcapital.com/api/v1/CtC/whatsappLeadDataSave',
+                    [
+                        'MobileNo' => $validated['phone'],
+                        'AssignedToID' => $user->bitrix_user_id ?? null,
+                        'AgentEmail' => $user->email,
+                    ]
+                );
+
+            Log::info('New customer pushed to Bitrix via inspection API.', [
+                'customer_id' => $customer->id,
+                'phone' => $validated['phone'],
+                'assigned_to' => $user->bitrix_user_id,
+                'agent_email' => $user->email,
+            ]);
+
+        } catch (\Throwable $e) {
+            Log::warning('Failed to push new lead to Bitrix inspection API.', [
+                'customer_id' => $customer->id,
+                'phone' => $validated['phone'],
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         return redirect()
             ->route(

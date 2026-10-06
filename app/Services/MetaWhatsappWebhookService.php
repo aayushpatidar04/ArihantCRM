@@ -1066,6 +1066,8 @@ class MetaWhatsappWebhookService
              * Use that executive directly.
              */
             $assignedUserId = $assignedUser->id;
+            $assignedUserBitrixId = $assignedUser->bitrix_user_id;
+            $assignedUserEmail = $assignedUser->email;
             $assignedTeamId = $assignedUser->team_id;
 
             Log::info('Assigning new customer to Bitrix lead agent.', [
@@ -1112,6 +1114,8 @@ class MetaWhatsappWebhookService
             }
 
             $assignedUserId = $assignment['user_id'];
+            $assignedUserBitrixId = $assignment['bitrix_user_id'];
+            $assignedUserEmail = $assignment['email'];
             $assignedTeamId = $assignment['team_id'];
         }
 
@@ -1148,6 +1152,50 @@ class MetaWhatsappWebhookService
                 ? 'bitrix'
                 : 'round_robin',
         ]);
+
+        /*
+ |--------------------------------------------------------------------------
+ | Notify external API about the new lead
+ |--------------------------------------------------------------------------
+ */
+        try {
+            $agentEmail = $assignedUserEmail ?? null;
+
+            $payload = [
+                'MobileNo' => $phone,
+                'AssignedToID' => (string) $assignedUserBitrixId,
+                'AgentEmail' => $agentEmail,
+            ];
+
+            Http::withBasicAuth(
+                'satapark.arihantcapital',
+                'Arinant@12345'
+            )
+                ->acceptJson()
+                ->timeout(15)
+                ->post(
+                    'https://inspection.arihantcapital.com/api/v1/CtC/whatsappLeadDataSave',
+                    $payload
+                );
+
+            Log::info('External API notified for new lead.', [
+                'customer_id' => $customer->id,
+                'phone' => $phone,
+                'assigned_to' => $assignedUserBitrixId,
+                'agent_email' => $agentEmail,
+            ]);
+
+        } catch (\Throwable $e) {
+            /*
+             * Do NOT fail the entire customer creation
+             * if the external API is unreachable.
+             */
+            Log::warning('Failed to notify external API for new lead.', [
+                'customer_id' => $customer->id,
+                'phone' => $phone,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         return $customer;
     }
@@ -1513,6 +1561,8 @@ class MetaWhatsappWebhookService
 
         return [
             'user_id' => $nextExecutive->id,
+            'bitrix_user_id' => $nextExecutive->bitrix_user_id,
+            'email' => $nextExecutive->email,
             'team_id' => $nextExecutive->team_id,
         ];
     }
